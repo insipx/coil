@@ -1,7 +1,9 @@
 # Coil
 
-### An async postgres background work queue built with SQLx and inspired by [`swirl`](https://github.com/sgrif/swirl)
+### An async task queue built with SQLx, Postgres, and Rayon
 
 
-#### Other Possible Names:
-- Coil (from inspiration of `swirl`
+
+
+
+
