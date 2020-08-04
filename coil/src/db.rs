@@ -14,41 +14,17 @@
 // You should have received a copy of the GNU General Public License
 // along with coil.  If not, see <http://www.gnu.org/licenses/>.
 
-
-mod error;
-mod db;
-
-use crate::error::Error;
 use serde::{Serialize, de::DeserializeOwned};
-use sqlx::PgPool;
 
-// TODO: How do we handle sync tasks?
-#[async_trait::async_trait]
-trait Job: Serialize + DeserializeOwned {
-    type Environment: 'static;
-    const JOB_TYPE: &'static str;
-    
-    /// inserts the job into the Postgres Database
-    async fn enqueue(self, pool: &PgPool) -> Result<(), Error>;
-    
-    /// Logic for actually running the job
-    async fn execute(&self);
+pub struct Job<T: Serialize + DeserializeOwned> {
+    id: usize,
+    priority: usize,
+    job_type: String,
+    sync: String,
+    data: T,
 }
 
-#[async_trait::async_trait]
-trait SyncJob: Serialize + DeserializeOwned {
-    type Environment: 'static;
-    const JOB_TYPE: &'static str;
-
-    fn enqueue(self, pool: &PgPool) -> Result<(), Error>;
-
-    fn execute(&self);
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
+//! Database Operations
+pub fn get_tasks_all() {
+    todo!(); 
 }

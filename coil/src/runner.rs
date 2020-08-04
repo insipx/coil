@@ -14,5 +14,22 @@
 // You should have received a copy of the GNU General Public License
 // along with coil.  If not, see <http://www.gnu.org/licenses/>.
 
+use sqlx::PgPool;
 
-pub struct Runner;
+pub struct RunnerBuilder;
+
+pub struct Runner {
+    pool: rayon::ThreadPool, 
+    conn: PgPool,
+    // maximum number of tasks to run at any one time
+    max_tasks: usize,
+}
+
+impl Runner {
+
+    pub fn run_all_pending_tasks() {
+        // get all pending tasks from the database
+        // saturate threadpool
+    }
+}
+
