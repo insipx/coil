@@ -14,17 +14,33 @@
 // You should have received a copy of the GNU General Public License
 // along with coil.  If not, see <http://www.gnu.org/licenses/>.
 
-use serde::{Serialize, de::DeserializeOwned};
+//! Database Operations for getting and deleting jobs
 
-pub struct Job<T: Serialize + DeserializeOwned> {
-    id: usize,
-    priority: usize,
+use crate::job::{Job, SyncJob};
+use sqlx::PgConnection;
+use serde::{Serialize, de::DeserializeOwned};
+use crate::error::Error;
+
+// TODO: Should add functionality for retrying failed jobs
+
+pub struct BackgroundJob {
+    id: i64,
     job_type: String,
-    sync: String,
-    data: T,
+    data: Vec<u8>,
 }
 
-//! Database Operations
-pub fn get_tasks_all() {
-    todo!(); 
+fn enqueue_sync_job<T: SyncJob>(conn: &mut PgConnection, job: T) -> Result<(), Error> {
+    todo!()
+}
+
+fn enqueue_async_job<T: Job>(conn: &mut PgConnection, job: T) -> Result<(), Error> {
+    todo!()
+}
+
+pub fn find_next_unlocked_job(conn: &mut PgConnection) -> BackgroundJob {
+    todo!();
+}
+
+pub fn delete_succesful_job(conn: &mut PgConnection, id: i64) -> Result<(), Error> {
+    todo!();
 }

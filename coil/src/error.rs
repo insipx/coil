@@ -21,5 +21,21 @@ pub enum Error {
     /// An error occurred while trying to insert the task into Postgres
     #[error("Error enqueuing task {0}")]
     EnqueueError(#[from] sqlx::Error),
+    #[error("error while performing a task")]
+    PerformError(#[from] rmp_serde::decode::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum PerformError {
+    #[error("Error decoding task data {0}")]
+    Decode(#[from] rmp_serde::decode::Error),
+    #[error("{0}")]
+    General(String),
+}
+
+impl From<&str> for PerformError {
+    fn from(err: &str) -> PerformError {
+        PerformError::General(err.to_string())
+    }
 }
 

@@ -17,38 +17,20 @@
 
 mod error;
 mod db;
+mod registry;
+mod job;
 
-use crate::error::Error;
-use serde::{Serialize, de::DeserializeOwned};
-use sqlx::PgPool;
+#[doc(hidden)]
+pub extern crate serde;
+#[doc(hidden)]
+pub extern crate inventory;
+#[doc(hidden)]
+pub use serde_derive::{Deserialize, Serialize};
 
-// TODO: How do we handle sync tasks?
-#[async_trait::async_trait]
-trait Job: Serialize + DeserializeOwned {
-    type Environment: 'static;
-    const JOB_TYPE: &'static str;
-    
-    /// inserts the job into the Postgres Database
-    async fn enqueue(self, pool: &PgPool) -> Result<(), Error>;
-    
-    /// Logic for actually running the job
-    async fn execute(&self);
-}
+#[doc(hidden)]
+pub use registry::JobVTable;
 
-#[async_trait::async_trait]
-trait SyncJob: Serialize + DeserializeOwned {
-    type Environment: 'static;
-    const JOB_TYPE: &'static str;
+pub use crate::job::*;
+pub use crate::error::*;
+pub use coil_proc_macro::*;
 
-    fn enqueue(self, pool: &PgPool) -> Result<(), Error>;
-
-    fn execute(&self);
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}

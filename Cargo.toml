@@ -2,5 +2,6 @@
 [workspace]
 members = [
 	"coil",
-	"coil_proc_macro"
+	"coil_proc_macro",
+	"integration_tests"
 ]
