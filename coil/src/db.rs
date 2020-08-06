@@ -16,13 +16,11 @@
 
 //! Database Operations for getting and deleting jobs
 
-use crate::job::{Job, SyncJob};
+use crate::job::Job;
 use sqlx::PgConnection;
-use serde::{Serialize, de::DeserializeOwned};
 use crate::error::EnqueueError;
 
-// TODO: Should add functionality for retrying failed jobs
-
+// TODO: functionality for retrying failed jobs
 
 pub struct BackgroundJob {
     id: i64,
@@ -30,7 +28,7 @@ pub struct BackgroundJob {
     data: Vec<u8>,
 }
 
-pub async fn enqueue_job<T: SyncJob>(conn: &mut PgConnection, job: T) -> Result<(), EnqueueError> {
+pub async fn enqueue_job<T: Job>(conn: &mut PgConnection, job: T) -> Result<(), EnqueueError> {
     let data = rmp_serde::encode::to_vec(&job)?;
     sqlx::query!("INSERT INTO _background_tasks (job_type, data) VALUES ($1, $2)", T::JOB_TYPE, data)
         .execute(conn)

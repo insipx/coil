@@ -17,14 +17,14 @@
 use crate::error::{EnqueueError, PerformError};
 use serde::{Serialize, de::DeserializeOwned};
 use sqlx::PgPool;
-
+use futures::Future;
 
 // TODO: How do we handle sync tasks?
-#[async_trait::async_trait]
 pub trait Job: Serialize + DeserializeOwned {
     type Environment: 'static;
     const JOB_TYPE: &'static str;
-    
+    const ASYNC: bool;    
+
     /// inserts the job into the Postgres Database
     fn enqueue(self, pool: &PgPool) -> Result<(), EnqueueError> {
         println!("YO BOI");
@@ -33,18 +33,6 @@ pub trait Job: Serialize + DeserializeOwned {
     
     /// Logic for actually running the job
     fn perform(self, env: &Self::Environment, pool: &sqlx::PgPool) -> Result<(), PerformError>;
+
+    fn perform_async(self, env: &Self::Environment, pool: &sqlx::PgPool) -> Box<dyn Future<Output = Result<(), PerformError>>>;
 }
-
-/// Trait for creating Syncronous Jobs
-pub trait SyncJob: Serialize + DeserializeOwned {
-    type Environment: 'static;
-    const JOB_TYPE: &'static str;
-
-    fn enqueue(self, pool: &PgPool) -> Result<(), EnqueueError> {
-        println!("YO BOI");
-        Ok(())
-    }
-
-    fn perform(&self);
-}
-

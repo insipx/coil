@@ -19,6 +19,7 @@ mod error;
 mod db;
 mod registry;
 mod job;
+mod runner;
 
 #[doc(hidden)]
 pub extern crate serde;
@@ -33,4 +34,4 @@ pub use registry::JobVTable;
 pub use crate::job::*;
 pub use crate::error::*;
 pub use coil_proc_macro::*;
-
+pub use crate::runner::Builder as RunnerBuilder;

@@ -17,6 +17,12 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+pub enum Error {
+    #[error("Building pool failed {0}")]
+    Build(#[from] rayon::ThreadPoolBuildError),
+}
+
+#[derive(Debug, Error)]
 pub enum EnqueueError {
     /// An error occurred while trying to insert the task into Postgres
     #[error("Error inserting task {0}")]
