@@ -17,3 +17,9 @@ fn resize_image(file_name: String, dimensions: Size) -> Result<(), coil::Perform
     println!("Hello");
     Ok(())
 }
+
+#[coil::background_job] 
+async fn resize_image(file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
+    println!("Hello");
+    Ok(())
+}

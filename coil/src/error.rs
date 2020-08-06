@@ -17,12 +17,12 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub enum EnqueueError {
     /// An error occurred while trying to insert the task into Postgres
-    #[error("Error enqueuing task {0}")]
-    EnqueueError(#[from] sqlx::Error),
-    #[error("error while performing a task")]
-    PerformError(#[from] rmp_serde::decode::Error),
+    #[error("Error inserting task {0}")]
+    Sql(#[from] sqlx::Error),
+    #[error("Error encoding task for insertion {0}")]
+    Encode(#[from] rmp_serde::encode::Error)
 }
 
 #[derive(Debug, Error)]

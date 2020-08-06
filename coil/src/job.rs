@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with coil.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::error::{Error, PerformError};
+use crate::error::{EnqueueError, PerformError};
 use serde::{Serialize, de::DeserializeOwned};
 use sqlx::PgPool;
 
@@ -26,7 +26,7 @@ pub trait Job: Serialize + DeserializeOwned {
     const JOB_TYPE: &'static str;
     
     /// inserts the job into the Postgres Database
-    fn enqueue(self, pool: &PgPool) -> Result<(), Error> {
+    fn enqueue(self, pool: &PgPool) -> Result<(), EnqueueError> {
         println!("YO BOI");
         Ok(())
     }
@@ -40,7 +40,7 @@ pub trait SyncJob: Serialize + DeserializeOwned {
     type Environment: 'static;
     const JOB_TYPE: &'static str;
 
-    fn enqueue(self, pool: &PgPool) -> Result<(), Error> {
+    fn enqueue(self, pool: &PgPool) -> Result<(), EnqueueError> {
         println!("YO BOI");
         Ok(())
     }

@@ -19,9 +19,10 @@
 use crate::job::{Job, SyncJob};
 use sqlx::PgConnection;
 use serde::{Serialize, de::DeserializeOwned};
-use crate::error::Error;
+use crate::error::EnqueueError;
 
 // TODO: Should add functionality for retrying failed jobs
+
 
 pub struct BackgroundJob {
     id: i64,
@@ -29,18 +30,24 @@ pub struct BackgroundJob {
     data: Vec<u8>,
 }
 
-fn enqueue_sync_job<T: SyncJob>(conn: &mut PgConnection, job: T) -> Result<(), Error> {
-    todo!()
+pub async fn enqueue_job<T: SyncJob>(conn: &mut PgConnection, job: T) -> Result<(), EnqueueError> {
+    let data = rmp_serde::encode::to_vec(&job)?;
+    sqlx::query!("INSERT INTO _background_tasks (job_type, data) VALUES ($1, $2)", T::JOB_TYPE, data)
+        .execute(conn)
+        .await?;
+    Ok(())
 }
 
-fn enqueue_async_job<T: Job>(conn: &mut PgConnection, job: T) -> Result<(), Error> {
-    todo!()
+pub async fn find_next_unlocked_job(conn: &mut PgConnection) -> Result<BackgroundJob, EnqueueError> {
+    sqlx::query_as!(BackgroundJob, "SELECT id, job_type, data FROM _background_tasks ORDER BY id FOR UPDATE SKIP LOCKED")
+        .fetch_one(conn)
+        .await
+        .map_err(Into::into)
 }
 
-pub fn find_next_unlocked_job(conn: &mut PgConnection) -> BackgroundJob {
-    todo!();
-}
-
-pub fn delete_succesful_job(conn: &mut PgConnection, id: i64) -> Result<(), Error> {
-    todo!();
+pub async fn delete_succesful_job(conn: &mut PgConnection, id: i64) -> Result<(), EnqueueError> {
+    sqlx::query!("DELETE FROM _background_tasks WHERE id=$1", id)
+        .execute(conn)
+        .await?;
+    Ok(())
 }
