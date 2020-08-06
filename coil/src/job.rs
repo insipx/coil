@@ -18,6 +18,7 @@ use crate::error::{EnqueueError, PerformError};
 use serde::{Serialize, de::DeserializeOwned};
 use sqlx::PgPool;
 use futures::Future;
+use std::pin::Pin;
 
 // TODO: How do we handle sync tasks?
 pub trait Job: Serialize + DeserializeOwned {
@@ -32,7 +33,11 @@ pub trait Job: Serialize + DeserializeOwned {
     }
     
     /// Logic for actually running the job
-    fn perform(self, env: &Self::Environment, pool: &sqlx::PgPool) -> Result<(), PerformError>;
+    fn perform(self, env: &Self::Environment, pool: &sqlx::PgPool) -> Result<(), PerformError> {
+        Err(PerformError::WrongJob)
+    }
 
-    fn perform_async(self, env: &Self::Environment, pool: &sqlx::PgPool) -> Box<dyn Future<Output = Result<(), PerformError>>>;
+    fn perform_async(self, env: &Self::Environment, pool: &sqlx::PgPool) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>> {
+        Box::pin(futures::future::err(PerformError::WrongJob))
+    }
 }

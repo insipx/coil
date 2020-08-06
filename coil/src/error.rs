@@ -35,6 +35,8 @@ pub enum EnqueueError {
 pub enum PerformError {
     #[error("Error decoding task data {0}")]
     Decode(#[from] rmp_serde::decode::Error),
+    #[error("Trying to perform a async job in a sync context or vice-versa")]
+    WrongJob,
     #[error("{0}")]
     General(String),
 }

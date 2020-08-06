@@ -19,9 +19,10 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::marker::PhantomData;
-
+use futures::Future;
 use crate::error::PerformError;
 use crate::job::Job;
+use std::pin::Pin;
 
 #[derive(Default)]
 #[allow(missing_debug_implementations)] // Can't derive debug
@@ -69,27 +70,55 @@ macro_rules! register_job {
     };
 }
 
+#[derive(Copy, Clone)]
+enum SyncOrAsync {
+    Sync {
+        fun: fn(Vec<u8>, &dyn Any, &sqlx::PgPool) -> Result<(), PerformError>
+    },
+    Async {
+        fun: fn(Vec<u8>, &dyn Any, &sqlx::PgPool) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>>, PerformError>
+    }
+}
+
+impl SyncOrAsync {
+    pub fn is_async(&self) -> bool {
+        match self {
+            SyncOrAsync::Async{..} => true,
+            _ => false
+        }
+    }
+}
+
 #[doc(hidden)]
 #[derive(Clone, Copy)]
 pub struct JobVTable {
     env_type: TypeId,
     job_type: &'static str,
-    perform: fn(Vec<u8>, &dyn Any, &sqlx::PgPool) -> Result<(), PerformError>,
+    perform: SyncOrAsync,
 }
 
 inventory::collect!(JobVTable);
 
 impl JobVTable {
     pub fn from_job<T: Job>() -> Self {
+        let perform = if T::ASYNC {
+            SyncOrAsync::Async {
+                fun: perform_async_job::<T>,
+            }
+        } else {
+            SyncOrAsync::Sync {
+                fun: perform_sync_job::<T>,
+            }
+        };
         Self {
             env_type: TypeId::of::<T::Environment>(),
             job_type: T::JOB_TYPE,
-            perform: perform_job::<T>,
+            perform,
         }
     }
 }
 
-fn perform_job<T: Job>(
+fn perform_sync_job<T: Job>(
     data: Vec<u8>,
     env: &dyn Any,
     pool: &sqlx::PgPool,
@@ -103,19 +132,55 @@ fn perform_job<T: Job>(
     T::perform(data, environment, pool)
 }
 
+fn perform_async_job<T: Job>(
+    data: Vec<u8>,
+    env: &dyn Any,
+    pool: &sqlx::PgPool,
+) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>>, PerformError> {
+    let environment = env.downcast_ref().ok_or_else::<PerformError, _>(|| {
+        "Incorrect environment type. This should never happen. \
+         Please open an issue at https://github.com/paritytech/coil/issues/new"
+            .into()
+    })?;
+    let data = rmp_serde::from_read(data.as_slice())?;
+    Ok(Box::pin(T::perform_async(data, environment, pool)))
+}
+
 pub struct PerformJob<Env> {
     vtable: JobVTable,
     _marker: PhantomData<Env>,
 }
 
 impl<Env: 'static> PerformJob<Env> {
-    pub fn perform(
+    pub fn perform_sync(
         &self,
         data: Vec<u8>,
         env: &Env,
         pool: &sqlx::PgPool,
     ) -> Result<(), PerformError> {
-        let perform_fn = self.vtable.perform;
-        perform_fn(data, env, pool)
+        match self.vtable.perform {
+            SyncOrAsync::Sync { fun } => {
+                fun(data, env, pool)
+            },
+            SyncOrAsync::Async { fun } => {
+                futures::executor::block_on(fun(data, env, pool)?)
+            }
+        }
+    }
+
+    pub async fn perform_async(
+        &self,
+        data: Vec<u8>,
+        env: &Env,
+        pool: &sqlx::PgPool
+    ) -> Result<(), PerformError> {
+        match self.vtable.perform {
+            SyncOrAsync::Sync { fun } => {
+                fun(data, env, pool)
+            },
+            SyncOrAsync::Async { fun } => {
+                fun(data, env, pool)?.await
+            }
+        }
     }
 }
