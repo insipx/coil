@@ -14,7 +14,7 @@ Supports Synchronous and Asynchronous jobs. Synchronous jobs will be spawned int
 
 ### Examples
 
-```
+```rust
 struct Size {
 	width: u32,
 	height: u32
@@ -27,7 +27,7 @@ async fn resize_image(id: u32, size: Size) -> Result<(), Error> {
 ```
 
 With an environment
-```
+```rust
 struct Size {
 	width: u32,
 	height: u32
