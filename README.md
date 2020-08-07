@@ -12,6 +12,35 @@ Supports Synchronous and Asynchronous jobs. Synchronous jobs will be spawned int
 
 
 
+### Examples
 
+```
+struct Size {
+	width: u32,
+	height: u32
+}
 
+#[coil::background_task]
+async fn resize_image(id: u32, size: Size) -> Result<(), Error> {
+	// some work
+}
+```
 
+With an environment
+```
+struct Size {
+	width: u32,
+	height: u32
+}
+
+struct Environment {
+    file_server_private_key: String,
+    http_client: http_lib::Client,
+    conn: sqlx::PgPool
+}
+
+#[coil::background_task]
+async fn resize_image(env: &Environment, id: u32, size: Size) -> Result<(), Error> {
+	// some work
+}
+```
