@@ -44,3 +44,9 @@ async fn resize_image(env: &Environment, id: u32, size: Size) -> Result<(), Erro
 	// some work
 }
 ```
+
+### Differences from [`swirl`](https://github.com/sgrif/swirl)
+- Supports asyncronous jobs/executors
+- Serializes data into Postgres with Messagepack instead of Json. Saves disk-space but doesn't allow for querying of job-data directly in SQL
+- In asyncronous jobs, database queryies will be run asynchronously with SQLx
+- Migrations are included in the binary and exposed via a `migrate` fn. Results in less boilerplate setting up the database.
