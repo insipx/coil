@@ -19,7 +19,7 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use futures::Future;
+use futures::{Future, FutureExt};
 use crate::error::PerformError;
 use crate::job::Job;
 use std::pin::Pin;
@@ -76,7 +76,7 @@ enum SyncOrAsync {
         fun: fn(Vec<u8>, &dyn Any, &sqlx::PgPool) -> Result<(), PerformError>
     },
     Async {
-        fun: fn(Vec<u8>, &dyn Any, &sqlx::PgPool) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>>, PerformError>
+        fun: fn(Vec<u8>, &'static dyn Any, &'static sqlx::PgPool) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>>, PerformError>
     }
 }
 
@@ -100,7 +100,7 @@ pub struct JobVTable {
 inventory::collect!(JobVTable);
 
 impl JobVTable {
-    pub fn from_job<T: Job>() -> Self {
+    pub fn from_job<T: Job + Send + 'static>() -> Self {
         let perform = if T::ASYNC {
             SyncOrAsync::Async {
                 fun: perform_async_job::<T>,
@@ -132,10 +132,10 @@ fn perform_sync_job<T: Job>(
     T::perform(data, environment, pool)
 }
 
-fn perform_async_job<T: Job>(
+fn perform_async_job<T: Job + Send + 'static>(
     data: Vec<u8>,
-    env: &dyn Any,
-    pool: &sqlx::PgPool,
+    env: &'static (dyn Any + 'static),
+    pool: &'static sqlx::PgPool,
 ) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>>, PerformError> {
     let environment = env.downcast_ref().ok_or_else::<PerformError, _>(|| {
         "Incorrect environment type. This should never happen. \
@@ -143,7 +143,7 @@ fn perform_async_job<T: Job>(
             .into()
     })?;
     let data = rmp_serde::from_read(data.as_slice())?;
-    Ok(Box::pin(T::perform_async(data, environment, pool)))
+    Ok(T::perform_async(data, environment, pool).boxed())
 }
 
 pub struct PerformJob<Env> {
@@ -159,8 +159,8 @@ impl<Env: 'static> PerformJob<Env> {
     pub fn perform_sync(
         &self,
         data: Vec<u8>,
-        env: &Env,
-        pool: &sqlx::PgPool,
+        env: &'static Env,
+        pool: &'static sqlx::PgPool,
     ) -> Result<(), PerformError> {
         match self.vtable.perform {
             SyncOrAsync::Sync { fun } => {
@@ -179,8 +179,8 @@ impl<Env: 'static> PerformJob<Env> {
     pub async fn perform_async(
         &self,
         data: Vec<u8>,
-        env: &Env,
-        pool: &sqlx::PgPool
+        env: &'static Env,
+        pool: &'static sqlx::PgPool
     ) -> Result<(), PerformError> {
         match self.vtable.perform {
             SyncOrAsync::Sync { fun } => {

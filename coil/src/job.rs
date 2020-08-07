@@ -21,8 +21,9 @@ use futures::Future;
 use std::pin::Pin;
 
 // TODO: How do we handle sync tasks?
+#[async_trait::async_trait]
 pub trait Job: Serialize + DeserializeOwned {
-    type Environment: 'static;
+    type Environment: 'static + Send + Sync;
     const JOB_TYPE: &'static str;
     const ASYNC: bool;    
 
@@ -37,7 +38,7 @@ pub trait Job: Serialize + DeserializeOwned {
         Err(PerformError::WrongJob)
     }
 
-    fn perform_async(self, env: &Self::Environment, pool: &sqlx::PgPool) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>> {
-        Box::pin(futures::future::err(PerformError::WrongJob))
+    async fn perform_async(self, env: &Self::Environment, pool: &sqlx::PgPool) -> Result<(), PerformError> {
+        Err(PerformError::WrongJob)
     }
 }

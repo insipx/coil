@@ -26,6 +26,8 @@ pub extern crate serde;
 #[doc(hidden)]
 pub extern crate inventory;
 #[doc(hidden)]
+pub extern crate async_trait;
+#[doc(hidden)]
 pub use serde_derive::{Deserialize, Serialize};
 
 #[doc(hidden)]

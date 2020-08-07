@@ -32,13 +32,14 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                     #(#struct_assign),*
                 }
             }
-
+            
+            #[coil::async_trait::async_trait]
             impl coil::Job for #name :: Job {
                 type Environment = #env_type;
                 const JOB_TYPE: &'static str = stringify!(#name);
                 const ASYNC: bool = true;
 
-                #fn_token perform_async(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
+                async #fn_token perform_async(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
                     let Self { #(#arg_names),* } = self;
                     #body
                 }
@@ -111,6 +112,7 @@ impl BackgroundJob {
             sig,
             block,
         } = item;
+
         let mut is_async = false;
         if let Some(constness) = sig.constness {
             return Err(constness
