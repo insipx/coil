@@ -152,6 +152,10 @@ pub struct PerformJob<Env> {
 }
 
 impl<Env: 'static> PerformJob<Env> {
+    /// Perform a job in a synchronous way.
+    ///
+    /// # Blocks
+    /// If the underlying job is async, this method will turn it into a blocking function
     pub fn perform_sync(
         &self,
         data: Vec<u8>,
@@ -167,7 +171,11 @@ impl<Env: 'static> PerformJob<Env> {
             }
         }
     }
-
+    
+    /// Perform a job in an asynchronous way
+    ///
+    /// # Blocks
+    /// If the underlying job is synchronous, this method will block
     pub async fn perform_async(
         &self,
         data: Vec<u8>,

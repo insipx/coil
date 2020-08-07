@@ -23,41 +23,77 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
     let arg_names = job.args.names();
     let return_type = job.return_type;
     let body = connection_arg.wrap(job.body);
+    
+    let res = if job.is_async {
+        quote! {
+            #(#attrs)*
+            #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
+                #name :: Job {
+                    #(#struct_assign),*
+                }
+            }
 
-    let res = quote! {
-        #(#attrs)*
-        #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
-            #name :: Job {
-                #(#struct_assign),*
+            impl coil::Job for #name :: Job {
+                type Environment = #env_type;
+                const JOB_TYPE: &'static str = stringify!(#name);
+                const ASYNC: bool = true;
+
+                #fn_token perform_async(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
+                    let Self { #(#arg_names),* } = self;
+                    #body
+                }
+            }
+
+            mod #name {
+                use super::*;
+
+                #[derive(coil::Serialize, coil::Deserialize)]
+                #[serde(crate = "coil::serde")]
+                pub struct Job {
+                    #(#struct_def),*
+                }
+
+                coil::register_job!(Job);
             }
         }
-
-        impl coil::Job for #name :: Job {
-            type Environment = #env_type;
-            const JOB_TYPE: &'static str = stringify!(#name);
-
-            #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
-                let Self { #(#arg_names),* } = self;
-                #body
-            }
-        }
-
-        mod #name {
-            use super::*;
-
-            #[derive(coil::Serialize, coil::Deserialize)]
-            #[serde(crate = "coil::serde")]
-            pub struct Job {
-                #(#struct_def),*
+    } else {
+        quote! {
+            #(#attrs)*
+            #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
+                #name :: Job {
+                    #(#struct_assign),*
+                }
             }
 
-            coil::register_job!(Job);
+            impl coil::Job for #name :: Job {
+                type Environment = #env_type;
+                const JOB_TYPE: &'static str = stringify!(#name);
+                const ASYNC: bool = false;
+
+                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
+                    let Self { #(#arg_names),* } = self;
+                    #body
+                }
+            }
+
+            mod #name {
+                use super::*;
+
+                #[derive(coil::Serialize, coil::Deserialize)]
+                #[serde(crate = "coil::serde")]
+                pub struct Job {
+                    #(#struct_def),*
+                }
+
+                coil::register_job!(Job);
+            }
         }
     };
     Ok(res)
 }
 
 struct BackgroundJob {
+    is_async: bool,
     attrs: Vec<syn::Attribute>,
     visibility: syn::Visibility,
     fn_token: syn::Token![fn],
@@ -75,7 +111,7 @@ impl BackgroundJob {
             sig,
             block,
         } = item;
-
+        let mut is_async = false;
         if let Some(constness) = sig.constness {
             return Err(constness
                 .span
@@ -88,10 +124,8 @@ impl BackgroundJob {
                 .error("#[coil::background_job] cannot be used on unsafe functions"));
         }
 
-        if let Some(asyncness) = sig.asyncness {
-            return Err(asyncness
-                .span
-                .error("#[coil::background_job] cannot be used on async functions"));
+        if let Some(_) = sig.asyncness {
+            is_async = true;
         }
 
         if let Some(abi) = sig.abi {
@@ -126,6 +160,7 @@ impl BackgroundJob {
             args: job_args,
             return_type,
             body: block.stmts,
+            is_async,
         })
     }
 }
