@@ -8,7 +8,7 @@ Coil is built first for use in [`substrate-archive`](https://github.com/parityte
 
 
 
-Supports Synchronous and Asynchronous jobs. Synchronous jobs will be spawned into a threadpool managed by [`rayon`](https://github.com/rayon-rs/rayon). Async jobs will be spawned onto an executor. The only requirement is that the executor implements the futures `Spawn` trait. This way, `coil` supports `Tokio`, `smol`, and `async-std`.
+Supports synchronous and asynchronous jobs. Synchronous jobs will be spawned into a threadpool managed by [`rayon`](https://github.com/rayon-rs/rayon). Async jobs will be spawned onto an executor. The only requirement is that the executor implements the futures `Spawn` trait. This way, `coil` supports `Tokio`, `smol`, and `async-std`.
 
 
 
@@ -44,3 +44,9 @@ async fn resize_image(env: &Environment, id: u32, size: Size) -> Result<(), Erro
 	// some work
 }
 ```
+
+### Differences from [`swirl`](https://github.com/sgrif/swirl)
+- Supports asyncronous jobs/executors
+- Serializes data into Postgres with Messagepack instead of Json. Saves disk-space but doesn't allow for querying of job-data directly in SQL
+- In asyncronous jobs, database queries will be run asynchronously with SQLx
+- Migrations are included in the binary and exposed via a `migrate` fn. Results in less boilerplate setting up the database.
