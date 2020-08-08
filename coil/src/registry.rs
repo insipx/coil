@@ -168,10 +168,10 @@ impl<Env: 'static + Send + Sync> PerformJob<Env> {
     ///
     /// # Blocks
     /// If the underlying job is async, this method will turn it into a blocking function
-    pub fn perform_sync<'s>(
+    pub fn perform_sync(
         &self,
         data: Vec<u8>,
-        env: &'s Env,
+        env: &Env,
         conn: &mut Conn,
     ) -> Result<(), PerformError> {
         match self.vtable.perform {
