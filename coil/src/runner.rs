@@ -102,7 +102,6 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
     }
 
     async fn run_single_job(&self) -> Result<(), Error> {
-        // let conn = self.conn.clone();
         let env = Arc::clone(&self.environment);
         let registry = Arc::clone(&self.registry);
         let mut transaction = self.conn.begin().await?;

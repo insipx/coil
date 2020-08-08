@@ -15,8 +15,8 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
     let env_pat = &job.args.env_arg.pat;
     let env_type = &job.args.env_arg.ty;
     let connection_arg = &job.args.connection_arg;
-    let pool_pat = connection_arg.pool_pat();
-    let pool_ty = connection_arg.pool_ty();
+    // let pool_pat = connection_arg.pool_pat();
+    // let pool_ty = connection_arg.pool_ty();
     let fn_args = job.args.iter();
     let struct_def = job.args.struct_def();
     let struct_assign = job.args.struct_assign();
@@ -32,14 +32,14 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                     #(#struct_assign),*
                 }
             }
-            
-            #[coil::async_trait::async_trait]
+
+            #[coil::async_trait::async_trait] 
             impl coil::Job for #name :: Job {
                 type Environment = #env_type;
                 const JOB_TYPE: &'static str = stringify!(#name);
                 const ASYNC: bool = true;
 
-                async #fn_token perform_async(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
+                async #fn_token perform_async(self, #env_pat: std::sync::Arc<Self::Environment>, conn: &mut sqlx::Transaction<'static, coil::sqlx::Postgres>) #return_type {
                     let Self { #(#arg_names),* } = self;
                     #body
                 }
@@ -71,7 +71,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 const JOB_TYPE: &'static str = stringify!(#name);
                 const ASYNC: bool = false;
 
-                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
+                #fn_token perform(self, #env_pat: &Self::Environment, conn: &mut sqlx::Transaction<'static, coil::sqlx::Postgres>) #return_type {
                     let Self { #(#arg_names),* } = self;
                     #body
                 }
@@ -348,7 +348,7 @@ impl ConnectionArg {
             ConnectionArg::Pool(pat, _) => Cow::Borrowed(pat),
         }
     }
-
+/*
     fn pool_ty(&self) -> Cow<'_, syn::Type> {
         if let ConnectionArg::Pool(_, ty) = self {
             Cow::Borrowed(ty)
@@ -356,7 +356,7 @@ impl ConnectionArg {
             Cow::Owned(syn::parse_quote!(sqlx::PgPool))
         }
     }
-
+*/
     fn wrap(&self, body: Vec<syn::Stmt>) -> TokenStream {
         let mut body = quote!(#(#body)*);
         if let ConnectionArg::SingleConnection(pat) = self {

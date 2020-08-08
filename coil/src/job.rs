@@ -20,7 +20,7 @@ use sqlx::{PgPool, Postgres};
 use std::sync::Arc;
 use sqlx::prelude::*;
 
-// TODO: How do we handle sync tasks?
+type Conn = sqlx::Transaction<'static, Postgres>;
 #[async_trait::async_trait]
 pub trait Job: Serialize + DeserializeOwned {
     type Environment: 'static + Send + Sync;
@@ -31,24 +31,20 @@ pub trait Job: Serialize + DeserializeOwned {
     /// inserts the job into the Postgres Database
     fn enqueue(self, pool: &PgPool) -> Result<(), EnqueueError> {
         println!("YO BOI");
-        todo!();
+        Ok(())
+        // todo!();
     }
     
     /// Logic for actually running a synchronous job
     #[doc(hidden)] 
-    fn perform<'a, E>(self, env: &Self::Environment, conn: E) -> Result<(), PerformError> 
-    where
-        E: Executor<'a, Database=Postgres>
+    fn perform(self, env: &Self::Environment, conn: &mut Conn) -> Result<(), PerformError> 
     {
         Err(PerformError::WrongJob)
     }
     
     /// Logic for running an asynchronous job
     #[doc(hidden)] 
-    async fn perform_async<'a, E>(self, env: Arc<Self::Environment>, conn: E) -> Result<(), PerformError> 
-    where
-        E: Executor<'a, Database=Postgres>
-    {
+    async fn perform_async(self, env: Arc<Self::Environment>, conn: &mut Conn) -> Result<(), PerformError> {
         Err(PerformError::WrongJob)
     }
 }

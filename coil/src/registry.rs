@@ -27,7 +27,7 @@ use std::sync::Arc;
 use sqlx::prelude::*;
 use sqlx::Postgres;
 
-type Conn<'a> = sqlx::Transaction<'static, Postgres>;
+type Conn = sqlx::Transaction<'static, Postgres>;
 
 #[derive(Default)]
 #[allow(missing_debug_implementations)] // Can't derive debug
