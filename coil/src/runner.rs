@@ -101,23 +101,23 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
     
     }
     async fn run_single_job(&self) -> Result<(), Error> {
-        let conn = self.conn.clone();
+        // let conn = self.conn.clone();
         let env = Arc::clone(&self.environment);
         let registry = Arc::clone(&self.registry);
-        let mut transaction = conn.begin().await?;
-        let job = db::find_next_unlocked_job(&conn).await?;
+        let mut transaction = self.conn.begin().await?;
+        let job = db::find_next_unlocked_job(&mut transaction).await?;
         let perform_fn = registry.get(&job.job_type)
             .ok_or_else(|| PerformError::from(format!("Unknown Job Type {}", job.job_type)))?;
         
         if perform_fn.is_async() {
             let handle = self.executor.spawn(async move {
-                perform_fn.perform_async(job.data, env, &mut transaction).await.unwrap();
+                perform_fn.perform_async(job.data, env, &mut transaction).unwrap().await.unwrap();
                 db::delete_succesful_job(&mut transaction, job.id).await.unwrap();
                 transaction.commit().await.unwrap();
             })?;
         } else {
-            self.pool.spawn_fifo(|| {
-                perform_fn.perform_sync(job.data, env, &mut transaction).unwrap();
+            self.pool.spawn_fifo(move || {
+                perform_fn.perform_sync(job.data, &env, &mut transaction).unwrap();
                 futures::executor::block_on(db::delete_succesful_job(&mut transaction, job.id)).unwrap();
                 futures::executor::block_on(transaction.commit()).unwrap();
             });

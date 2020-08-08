@@ -27,7 +27,7 @@ use std::sync::Arc;
 use sqlx::prelude::*;
 use sqlx::Postgres;
 
-type Conn<'a> = sqlx::Transaction<'a, Postgres>;
+type Conn<'a> = sqlx::Transaction<'static, Postgres>;
 
 #[derive(Default)]
 #[allow(missing_debug_implementations)] // Can't derive debug
@@ -78,10 +78,10 @@ macro_rules! register_job {
 #[derive(Copy, Clone)]
 enum SyncOrAsync {
     Sync {
-        fun: fn(Vec<u8>, &dyn Any, &mut Conn<'_>) -> Result<(), PerformError>
+        fun: fn(Vec<u8>, &dyn Any, &mut Conn) -> Result<(), PerformError>
     },
     Async {
-        fun: for<'a> fn(Vec<u8>, Arc<(dyn Any + Send + Sync)>, &'a mut Conn<'a>) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>, PerformError>
+        fun: for<'a> fn(Vec<u8>, Arc<(dyn Any + Send + Sync)>, &'a mut Conn) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>, PerformError>
     }
 }
 
@@ -126,7 +126,7 @@ impl JobVTable {
 fn perform_sync_job<T: Job>(
     data: Vec<u8>,
     env: &dyn Any,
-    conn: &mut Conn<'_>,
+    conn: &mut Conn,
 ) -> Result<(), PerformError> {
     let environment = env.downcast_ref().ok_or_else::<PerformError, _>(|| {
         "Incorrect environment type. This should never happen. \
@@ -140,7 +140,7 @@ fn perform_sync_job<T: Job>(
 fn perform_async_job<'a, T: 'static + Job + Send>(
     data: Vec<u8>,
     env: Arc<(dyn Any + Sync + Send)>,
-    conn: &'a mut Conn<'a>
+    conn: &'a mut Conn
 ) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>, PerformError> {
     let environment = env.downcast().unwrap(); 
     /*ok_or_else::<PerformError, _>(|| {
@@ -150,7 +150,7 @@ fn perform_async_job<'a, T: 'static + Job + Send>(
     })?;
     */
     let data = rmp_serde::from_read(data.as_slice())?;
-    Ok(T::perform_async(data, environment, conn).boxed())
+    Ok(T::perform_async(data, environment, conn))
 }
 
 pub struct PerformJob<Env> {
@@ -172,7 +172,7 @@ impl<Env: 'static + Send + Sync> PerformJob<Env> {
         &self,
         data: Vec<u8>,
         env: &'s Env,
-        conn: &mut Conn<'_>,
+        conn: &mut Conn,
     ) -> Result<(), PerformError> {
         match self.vtable.perform {
             SyncOrAsync::Sync { fun } => {
@@ -191,7 +191,7 @@ impl<Env: 'static + Send + Sync> PerformJob<Env> {
     /// If the underlying job is synchronous, this method will block
     pub fn perform_async<'a>(
         &self,
-        data: Vec<u8>, env: Arc<Env>, conn: &'a mut Conn<'a> 
+        data: Vec<u8>, env: Arc<Env>, conn: &'a mut Conn 
     ) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>, PerformError> {
         match self.vtable.perform {
             SyncOrAsync::Sync { .. } => {
