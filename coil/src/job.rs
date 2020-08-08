@@ -16,29 +16,39 @@
 
 use crate::error::{EnqueueError, PerformError};
 use serde::{Serialize, de::DeserializeOwned};
-use sqlx::PgPool;
-use futures::Future;
-use std::pin::Pin;
+use sqlx::{PgPool, Postgres};
+use std::sync::Arc;
+use sqlx::prelude::*;
 
 // TODO: How do we handle sync tasks?
 #[async_trait::async_trait]
 pub trait Job: Serialize + DeserializeOwned {
     type Environment: 'static + Send + Sync;
     const JOB_TYPE: &'static str;
+    #[doc(hidden)] 
     const ASYNC: bool;    
 
     /// inserts the job into the Postgres Database
     fn enqueue(self, pool: &PgPool) -> Result<(), EnqueueError> {
         println!("YO BOI");
-        Ok(())
+        todo!();
     }
     
-    /// Logic for actually running the job
-    fn perform(self, env: &Self::Environment, pool: &sqlx::PgPool) -> Result<(), PerformError> {
+    /// Logic for actually running a synchronous job
+    #[doc(hidden)] 
+    fn perform<'a, E>(self, env: &Self::Environment, conn: E) -> Result<(), PerformError> 
+    where
+        E: Executor<'a, Database=Postgres>
+    {
         Err(PerformError::WrongJob)
     }
-
-    async fn perform_async(self, env: &Self::Environment, pool: &sqlx::PgPool) -> Result<(), PerformError> {
+    
+    /// Logic for running an asynchronous job
+    #[doc(hidden)] 
+    async fn perform_async<'a, E>(self, env: Arc<Self::Environment>, conn: E) -> Result<(), PerformError> 
+    where
+        E: Executor<'a, Database=Postgres>
+    {
         Err(PerformError::WrongJob)
     }
 }

@@ -12,6 +12,12 @@ struct Size {
     width: u32,
 }
 
+#[coil::background_job]
+fn resize_image_sync(file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
+    println!("Hello");
+    Ok(())
+}
+
 #[coil::background_job] 
 async fn resize_image(file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
     println!("Hello");

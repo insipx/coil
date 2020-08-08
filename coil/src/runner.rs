@@ -17,7 +17,7 @@
 use sqlx::PgPool;
 use futures::task::{Spawn, SpawnExt};
 use std::sync::Arc;
-use crate::error::Error;
+use crate::{db, error::{Error, PerformError}, registry::Registry};
 
 pub struct Builder<Env> {
     environment: Env,
@@ -27,7 +27,7 @@ pub struct Builder<Env> {
     max_tasks: QueueAtOnce,
 }
 
-impl<Env> Builder<Env> {
+impl<Env: 'static> Builder<Env> {
     pub fn new(env: Env, executor: impl Spawn + 'static, conn: sqlx::PgPool) -> Self {
         let max_tasks = QueueAtOnce::default();
         Self {
@@ -60,6 +60,7 @@ impl<Env> Builder<Env> {
             executor: self.executor,
             conn: self.conn,
             environment: Arc::new(self.environment),
+            registry: Arc::new(Registry::load()),
             max_tasks: self.max_tasks
         })
     }
@@ -73,6 +74,7 @@ pub struct Runner<Env> {
     executor: Arc<dyn Spawn>,
     conn: PgPool,
     environment: Arc<Env>,
+    registry: Arc<Registry<Env>>,
     /// maximum number of tasks to run at any one time
     max_tasks: QueueAtOnce
 }
@@ -93,13 +95,37 @@ impl Default for QueueAtOnce {
     }
 }
 
-impl<Env> Runner<Env> {
+impl<Env: Send + Sync + 'static> Runner<Env> {
 
     pub fn run_all_pending_tasks(&self) {
-    }
     
-    fn run_single_job(&self) {
     }
+   /* 
+    async fn run_single_job(&self) -> Result<(), Error> {
+        let conn = self.conn.clone();
+        let env = Arc::clone(&self.environment);
+        let registry = Arc::clone(&self.registry);
+        let mut transaction = conn.begin().await?;
+        let job = db::find_next_unlocked_job(&conn).await?;
+        let perform_fn = registry.get(&job.job_type)
+            .ok_or_else(|| PerformError::from(format!("Unknown Job Type {}", job.job_type)))?;
+        
+        if perform_fn.is_async() {
+            let handle = self.executor.spawn(async move {
+                perform_fn.perform_async(job.data, env, &mut transaction).await.unwrap();
+                db::delete_succesful_job(&mut transaction, job.id).await.unwrap();
+                transaction.commit().await.unwrap();
+            })?;
+        } else {
+            self.pool.spawn_fifo(|| {
+                perform_fn.perform_sync(job.data, env, &mut transaction).unwrap();
+                futures::executor::block_on(db::delete_succesful_job(&mut transaction, job.id)).unwrap();
+                futures::executor::block_on(transaction.commit()).unwrap();
+            });
+        }
+        Ok(())
+    }
+   */
 }
 
 

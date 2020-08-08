@@ -17,18 +17,19 @@
 //! Database Operations for getting and deleting jobs
 
 use crate::job::Job;
-use sqlx::PgConnection;
 use crate::error::EnqueueError;
+use sqlx::prelude::*;
+use sqlx::Postgres;
 
 // TODO: functionality for retrying failed jobs
 
 pub struct BackgroundJob {
-    id: i64,
-    job_type: String,
-    data: Vec<u8>,
+    pub id: i64,
+    pub job_type: String,
+    pub data: Vec<u8>,
 }
 
-pub async fn enqueue_job<T: Job>(conn: &mut PgConnection, job: T) -> Result<(), EnqueueError> {
+pub async fn enqueue_job<T: Job>(conn: impl Executor<'_, Database=Postgres>, job: T) -> Result<(), EnqueueError> {
     let data = rmp_serde::encode::to_vec(&job)?;
     sqlx::query!("INSERT INTO _background_tasks (job_type, data) VALUES ($1, $2)", T::JOB_TYPE, data)
         .execute(conn)
@@ -36,14 +37,14 @@ pub async fn enqueue_job<T: Job>(conn: &mut PgConnection, job: T) -> Result<(), 
     Ok(())
 }
 
-pub async fn find_next_unlocked_job(conn: &mut PgConnection) -> Result<BackgroundJob, EnqueueError> {
+pub async fn find_next_unlocked_job(conn: impl Executor<'_, Database=Postgres>) -> Result<BackgroundJob, EnqueueError> {
     sqlx::query_as!(BackgroundJob, "SELECT id, job_type, data FROM _background_tasks ORDER BY id FOR UPDATE SKIP LOCKED")
         .fetch_one(conn)
         .await
         .map_err(Into::into)
 }
 
-pub async fn delete_succesful_job(conn: &mut PgConnection, id: i64) -> Result<(), EnqueueError> {
+pub async fn delete_succesful_job(conn: impl Executor<'_, Database=Postgres>, id: i64) -> Result<(), EnqueueError> {
     sqlx::query!("DELETE FROM _background_tasks WHERE id=$1", id)
         .execute(conn)
         .await?;

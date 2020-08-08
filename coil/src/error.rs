@@ -20,6 +20,14 @@ use thiserror::Error;
 pub enum Error {
     #[error("Building pool failed {0}")]
     Build(#[from] rayon::ThreadPoolBuildError),
+    #[error(transparent)]
+    Enqueue(#[from] EnqueueError),
+    #[error(transparent)]
+    Perform(#[from] PerformError),
+    #[error("error getting connection to db {0}")]
+    SQL(#[from] sqlx::Error),
+    #[error("Couldn't spawn onto executor {0}")]
+    Spawn(#[from] futures::task::SpawnError)
 }
 
 #[derive(Debug, Error)]
@@ -44,6 +52,12 @@ pub enum PerformError {
 impl From<&str> for PerformError {
     fn from(err: &str) -> PerformError {
         PerformError::General(err.to_string())
+    }
+}
+
+impl From<String> for PerformError {
+    fn from(err: String) -> PerformError {
+        PerformError::General(err)
     }
 }
 

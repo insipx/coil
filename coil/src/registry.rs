@@ -23,6 +23,11 @@ use futures::{Future, FutureExt};
 use crate::error::PerformError;
 use crate::job::Job;
 use std::pin::Pin;
+use std::sync::Arc;
+use sqlx::prelude::*;
+use sqlx::Postgres;
+
+type Conn<'a> = sqlx::Transaction<'a, Postgres>;
 
 #[derive(Default)]
 #[allow(missing_debug_implementations)] // Can't derive debug
@@ -73,10 +78,10 @@ macro_rules! register_job {
 #[derive(Copy, Clone)]
 enum SyncOrAsync {
     Sync {
-        fun: fn(Vec<u8>, &dyn Any, &sqlx::PgPool) -> Result<(), PerformError>
+        fun: fn(Vec<u8>, &dyn Any, &mut Conn<'_>) -> Result<(), PerformError>
     },
     Async {
-        fun: fn(Vec<u8>, &'static dyn Any, &'static sqlx::PgPool) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>>, PerformError>
+        fun: for<'a> fn(Vec<u8>, Arc<(dyn Any + Send + Sync)>, &'a mut Conn<'a>) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>, PerformError>
     }
 }
 
@@ -100,7 +105,7 @@ pub struct JobVTable {
 inventory::collect!(JobVTable);
 
 impl JobVTable {
-    pub fn from_job<T: Job + Send + 'static>() -> Self {
+    pub fn from_job<T: 'static + Job + Send>() -> Self {
         let perform = if T::ASYNC {
             SyncOrAsync::Async {
                 fun: perform_async_job::<T>,
@@ -121,7 +126,7 @@ impl JobVTable {
 fn perform_sync_job<T: Job>(
     data: Vec<u8>,
     env: &dyn Any,
-    pool: &sqlx::PgPool,
+    conn: &mut Conn<'_>,
 ) -> Result<(), PerformError> {
     let environment = env.downcast_ref().ok_or_else::<PerformError, _>(|| {
         "Incorrect environment type. This should never happen. \
@@ -129,21 +134,23 @@ fn perform_sync_job<T: Job>(
             .into()
     })?;
     let data = rmp_serde::from_read(data.as_slice())?;
-    T::perform(data, environment, pool)
+    T::perform(data, environment, conn)
 }
 
-fn perform_async_job<T: Job + Send + 'static>(
+fn perform_async_job<'a, T: 'static + Job + Send>(
     data: Vec<u8>,
-    env: &'static (dyn Any + 'static),
-    pool: &'static sqlx::PgPool,
-) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>>, PerformError> {
-    let environment = env.downcast_ref().ok_or_else::<PerformError, _>(|| {
+    env: Arc<(dyn Any + Sync + Send)>,
+    conn: &'a mut Conn<'a>
+) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>, PerformError> {
+    let environment = env.downcast().unwrap(); 
+    /*ok_or_else::<PerformError, _>(|| {
         "Incorrect environment type. This should never happen. \
          Please open an issue at https://github.com/paritytech/coil/issues/new"
             .into()
     })?;
+    */
     let data = rmp_serde::from_read(data.as_slice())?;
-    Ok(T::perform_async(data, environment, pool).boxed())
+    Ok(T::perform_async(data, environment, conn).boxed())
 }
 
 pub struct PerformJob<Env> {
@@ -151,23 +158,29 @@ pub struct PerformJob<Env> {
     _marker: PhantomData<Env>,
 }
 
-impl<Env: 'static> PerformJob<Env> {
+impl<Env: 'static + Send + Sync> PerformJob<Env> {
+    
+    pub fn is_async(&self) -> bool {
+        matches!(self.vtable.perform, SyncOrAsync::Async { .. })
+    }
+
     /// Perform a job in a synchronous way.
     ///
     /// # Blocks
     /// If the underlying job is async, this method will turn it into a blocking function
-    pub fn perform_sync(
+    pub fn perform_sync<'s>(
         &self,
         data: Vec<u8>,
-        env: &'static Env,
-        pool: &'static sqlx::PgPool,
+        env: &'s Env,
+        conn: &mut Conn<'_>,
     ) -> Result<(), PerformError> {
         match self.vtable.perform {
             SyncOrAsync::Sync { fun } => {
-                fun(data, env, pool)
+                fun(data, env, conn)
             },
             SyncOrAsync::Async { fun } => {
-                futures::executor::block_on(fun(data, env, pool)?)
+                // futures::executor::block_on(fun(data, env, conn)?)
+                panic!("Not Async");
             }
         }
     }
@@ -176,18 +189,16 @@ impl<Env: 'static> PerformJob<Env> {
     ///
     /// # Blocks
     /// If the underlying job is synchronous, this method will block
-    pub async fn perform_async(
+    pub fn perform_async<'a>(
         &self,
-        data: Vec<u8>,
-        env: &'static Env,
-        pool: &'static sqlx::PgPool
-    ) -> Result<(), PerformError> {
+        data: Vec<u8>, env: Arc<Env>, conn: &'a mut Conn<'a> 
+    ) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>, PerformError> {
         match self.vtable.perform {
-            SyncOrAsync::Sync { fun } => {
-                fun(data, env, pool)
+            SyncOrAsync::Sync { .. } => {
+                panic!("Not Sync");
             },
             SyncOrAsync::Async { fun } => {
-                fun(data, env, pool)?.await
+                fun(data, env, conn)
             }
         }
     }
