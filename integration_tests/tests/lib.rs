@@ -30,15 +30,21 @@ async fn resize_image(file_name: String, dimensions: Size) -> Result<(), coil::P
 }
 
 #[coil::background_job]
-async fn resize_image_gen(file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
-    println!("hello");
+async fn resize_image_with_env(env: &Environment, file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
+    println!("Hello");
+    println!("I have an environment");
+    println!("File Name: {}, height: {}, width: {}", file_name, dimensions.height, dimensions.width);
     Ok(())
 }
 
-#[coil::background_job]
-async fn resize_image_with_env(env: &Environment, file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
-    println!("Hello");
-    Ok(())
+struct Executor;
+
+impl futures::task::Spawn for Executor {
+    
+    fn spawn_obj(&self, future: futures::task::FutureObj<'static, ()>) -> Result<(), futures::task::SpawnError> {
+        smol::Task::spawn(future).detach();
+        Ok(())
+    }
 }
 
 #[test]
@@ -47,5 +53,27 @@ fn enqueue_simple_task() {
     resize_image("Hello".to_string(), Size { height: 0, width: 0 }).enqueue(&pool);
     resize_image_sync("Hello".to_string(), Size { height: 0, width: 0 }).enqueue(&pool);
     resize_image_with_env("Hello".to_string(), Size { height: 0, width: 0}).enqueue(&pool);
+}
+
+#[test]
+fn enqueue_5_jobs() {
+    let pool = smol::block_on(sqlx::PgPool::connect("postgres://archive:default@localhost:5432/test_job_queue")).unwrap();
+    let env = Environment {
+        conn: pool.clone()
+    };
+    smol::run(async move {
+        resize_image_with_env("tohru".to_string(), Size { height: 32, width: 32 }).enqueue(&pool).await;
+        resize_image_with_env("gambit".to_string(), Size { height: 64, width: 64 }).enqueue(&pool).await;
+        resize_image_with_env("chess".to_string(), Size { height: 64, width: 128 }).enqueue(&pool).await;
+        resize_image_with_env("kaguya".to_string(), Size { height: 256, width: 256 }).enqueue(&pool).await;
+        resize_image_with_env("L".to_string(), Size { height: 512, width: 512 }).enqueue(&pool).await;
+
+        let runner = coil::RunnerBuilder::new(env, Executor, pool)
+            .num_threads(8)
+            .build()
+            .unwrap();
+        runner.run_all_pending_tasks().await.unwrap()
+    });
+    
 }
 

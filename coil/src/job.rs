@@ -18,9 +18,9 @@ use crate::error::{EnqueueError, PerformError};
 use serde::{Serialize, de::DeserializeOwned};
 use sqlx::{PgPool, Postgres};
 use std::sync::Arc;
-use sqlx::prelude::*;
 
 type Conn = sqlx::Transaction<'static, Postgres>;
+
 #[async_trait::async_trait]
 pub trait Job: Serialize + DeserializeOwned {
     type Environment: 'static + Send + Sync;
@@ -29,22 +29,20 @@ pub trait Job: Serialize + DeserializeOwned {
     const ASYNC: bool;    
 
     /// inserts the job into the Postgres Database
-    fn enqueue(self, pool: &PgPool) -> Result<(), EnqueueError> {
-        println!("YO BOI");
-        Ok(())
-        // todo!();
+    async fn enqueue(self, pool: &PgPool) -> Result<(), EnqueueError> {
+        crate::db::enqueue_job(pool, self).await
     }
     
     /// Logic for actually running a synchronous job
     #[doc(hidden)] 
-    fn perform(self, env: &Self::Environment, conn: &mut Conn) -> Result<(), PerformError> 
+    fn perform(self, _: &Self::Environment, _: &mut Conn) -> Result<(), PerformError> 
     {
         Err(PerformError::WrongJob)
     }
     
     /// Logic for running an asynchronous job
     #[doc(hidden)] 
-    async fn perform_async(self, env: Arc<Self::Environment>, conn: &mut Conn) -> Result<(), PerformError> {
+    async fn perform_async(self, _: Arc<Self::Environment>, _: &mut Conn) -> Result<(), PerformError> {
         Err(PerformError::WrongJob)
     }
 }

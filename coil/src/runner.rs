@@ -17,7 +17,8 @@
 use sqlx::PgPool;
 use futures::task::{Spawn, SpawnExt};
 use std::sync::Arc;
-use crate::{db, error::{Error, PerformError}, registry::Registry};
+use futures::{Stream, StreamExt};
+use crate::{db, error::*, registry::Registry};
 
 pub struct Builder<Env> {
     environment: Env,
@@ -85,7 +86,7 @@ pub enum QueueAtOnce {
     Threads,
     /// Saturate threadpool with `size` jobs at any one time
     Size(usize),
-    /// Queue all jobs
+    /// Queue all jobs at once
     All,
 }
 
@@ -95,22 +96,81 @@ impl Default for QueueAtOnce {
     }
 }
 
+enum Event {
+    Working,
+    NoJobAvailable,
+    // Errors
+}
+
 impl<Env: Send + Sync + 'static> Runner<Env> {
 
-    pub fn run_all_pending_tasks(&self) {
-    
+    pub async fn run_all_pending_tasks(&self) -> Result<(), Error> {
+        let num_tasks = match self.max_tasks {
+            QueueAtOnce::Threads => {
+                self.pool.current_num_threads()
+            },
+            QueueAtOnce::Size(s) => s,
+            QueueAtOnce::All => {
+                if let Some(s) = db::get_max_tasks(&self.conn).await? {
+                    s as usize
+                } else {
+                    self.pool.current_num_threads()
+                }
+            }
+        };
+        
+        let (tx, mut rx) = flume::bounded(num_tasks);
+
+        let mut pending_messages = 0;
+        
+        loop {
+            let jobs_to_queue = if pending_messages == 0 {
+                num_tasks
+            } else {
+                num_tasks - pending_messages
+            };
+
+            for _ in 0..jobs_to_queue {
+                self.run_single_job(tx.clone()).await?;
+            }
+            
+            while let Some(msg) = rx.next().await {
+                if pending_messages == 0 {
+                    continue;
+                }
+                match msg {
+                    Event::Working => pending_messages -= 1,
+                    Event::NoJobAvailable => return Ok(()),
+                    // error handling
+                }
+            }
+        }
     }
 
-    async fn run_single_job(&self) -> Result<(), Error> {
+    async fn run_single_job(&self, tx: flume::Sender<Event>) -> Result<(), Error> {
         let env = Arc::clone(&self.environment);
         let registry = Arc::clone(&self.registry);
         let mut transaction = self.conn.begin().await?;
-        let job = db::find_next_unlocked_job(&mut transaction).await?;
+        let job = match db::find_next_unlocked_job(&mut transaction).await {
+            Ok(Some(j)) => { 
+                tx.send_async(Event::Working).await.unwrap();
+                j 
+            },
+            Ok(None) => {
+                tx.send_async(Event::NoJobAvailable).await.unwrap();
+                return Ok(());
+            },
+            Err(e) =>  {
+                println!("{:?}", e);
+                panic!("ERROR!");
+            }
+        };
+
         let perform_fn = registry.get(&job.job_type)
             .ok_or_else(|| PerformError::from(format!("Unknown Job Type {}", job.job_type)))?;
         
         if perform_fn.is_async() {
-            let handle = self.executor.spawn(async move {
+            self.executor.spawn(async move {
                 perform_fn.perform_async(job.data, env, &mut transaction).unwrap().await.unwrap();
                 db::delete_succesful_job(&mut transaction, job.id).await.unwrap();
                 transaction.commit().await.unwrap();

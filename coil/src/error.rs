@@ -27,7 +27,13 @@ pub enum Error {
     #[error("error getting connection to db {0}")]
     SQL(#[from] sqlx::Error),
     #[error("Couldn't spawn onto executor {0}")]
-    Spawn(#[from] futures::task::SpawnError)
+    Spawn(#[from] futures::task::SpawnError),
+}
+
+#[derive(Debug, Error)]
+pub enum CommError {
+    #[error("Got no response from worker")]
+    NoMessage,
 }
 
 #[derive(Debug, Error)]

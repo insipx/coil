@@ -37,9 +37,9 @@ pub async fn enqueue_job<T: Job>(conn: impl Executor<'_, Database=Postgres>, job
     Ok(())
 }
 
-pub async fn find_next_unlocked_job(conn: impl Executor<'_, Database=Postgres>) -> Result<BackgroundJob, EnqueueError> {
+pub async fn find_next_unlocked_job(conn: impl Executor<'_, Database=Postgres>) -> Result<Option<BackgroundJob>, EnqueueError> {
     sqlx::query_as!(BackgroundJob, "SELECT id, job_type, data FROM _background_tasks ORDER BY id FOR UPDATE SKIP LOCKED")
-        .fetch_one(conn)
+        .fetch_optional(conn)
         .await
         .map_err(Into::into)
 }
@@ -50,3 +50,13 @@ pub async fn delete_succesful_job(conn: impl Executor<'_, Database=Postgres>, id
         .await?;
     Ok(())
 }
+
+pub async fn get_max_tasks(conn: impl Executor<'_, Database=Postgres>) -> Result<Option<i64>, EnqueueError> {
+    sqlx::query_as::<_, (i64, )>("SELECT COUNT(*) FROM _background_tasks")
+        .fetch_optional(conn)
+        .await
+        .map(|v| v.map(|v| v.0))
+        .map_err(Into::into)
+}
+
+
