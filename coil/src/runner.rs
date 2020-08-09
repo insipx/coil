@@ -18,7 +18,7 @@ use sqlx::PgPool;
 use futures::task::{Spawn, SpawnExt};
 use std::sync::Arc;
 use futures::{StreamExt, future::FutureExt};
-use crate::{db, error::*, registry::Registry};
+use crate::{db, error::*, registry::{Registry, PerformJob}};
 
 pub struct Builder<Env> {
     environment: Env,
@@ -97,7 +97,7 @@ impl Default for QueueAtOnce {
 enum Event {
     Working,
     NoJobAvailable,
-    // Errors
+    ErrorLoadingJob(Error),
 }
 
 impl<Env: Send + Sync + 'static> Runner<Env> {
@@ -120,52 +120,56 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
             } else {
                 num_tasks - pending_messages
             };
-
+            
             for _ in 0..jobs_to_queue {
                 self.run_single_job(tx.clone()).await?;
             }
             
             pending_messages += jobs_to_queue;
             let timeout = timer::Delay::new(std::time::Duration::from_secs(5));
-            futures::select!{
+            futures::select! {
                 msg = rx.next() => {
                     match msg {
                         Some(Event::Working) => pending_messages -=1,
                         Some(Event::NoJobAvailable) => return Ok(()),
-                        None => return Err(CommError::NoMessage.into())
+                        None => return Err(CommError::NoMessage.into()),
+                        _ => println!(" Fuck my shit up why don't you ")
                     }
                 },
                 _ = timeout.fuse() => return Err(CommError::NoMessage.into())
             };
         }
     }
-
+    
     async fn run_single_job(&self, tx: flume::Sender<Event>) -> Result<(), Error> {
         let env = Arc::clone(&self.environment);
         let registry = Arc::clone(&self.registry);
         let mut transaction = self.conn.begin().await?;
         let job = match db::find_next_unlocked_job(&mut transaction).await {
             Ok(Some(j)) => { 
-                tx.send_async(Event::Working).await.unwrap();
+                let _ = tx.send_async(Event::Working).await;
                 j 
             },
             Ok(None) => {
-                tx.send_async(Event::NoJobAvailable).await.unwrap();
+                let _ = tx.send_async(Event::NoJobAvailable).await;
                 return Ok(());
             },
             Err(e) =>  {
-                println!("{:?}", e);
-                panic!("ERROR!");
+                let _ = tx.send_async(Event::ErrorLoadingJob(e.into())).await;
+                return Ok(());
             }
         };
 
         let perform_fn = registry.get(&job.job_type)
             .ok_or_else(|| PerformError::from(format!("Unknown Job Type {}", job.job_type)))?;
-        
+        // need to unwind this 
         if perform_fn.is_async() {
             self.executor.spawn(async move {
-                perform_fn.perform_async(job.data, env, &mut transaction).unwrap().await.unwrap();
-                db::delete_succesful_job(&mut transaction, job.id).await.unwrap();
+                let res = perform_fn.perform_async(job.data, env, &mut transaction).await;
+                match  res {
+                    Ok(_) => db::delete_succesful_job(&mut transaction, job.id).await.unwrap(),
+                    Err(_) => db::update_failed_job(&mut transaction, job.id).await.unwrap(),
+                }
                 transaction.commit().await.unwrap();
             })?;
         } else {
@@ -178,4 +182,5 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
         Ok(())
     }
 }
+
 

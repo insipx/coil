@@ -51,6 +51,13 @@ pub async fn delete_succesful_job(conn: impl Executor<'_, Database=Postgres>, id
     Ok(())
 }
 
+pub async fn update_failed_job(conn: impl Executor<'_, Database=Postgres>, id: i64) -> Result<(), EnqueueError> {
+    sqlx::query!("UPDATE _background_tasks SET retries = retries + 1, last_retry = NOW() WHERE id = $1", id)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
 pub async fn get_max_tasks(conn: impl Executor<'_, Database=Postgres>) -> Result<Option<i64>, EnqueueError> {
     sqlx::query_as::<_, (i64, )>("SELECT COUNT(*) FROM _background_tasks")
         .fetch_optional(conn)

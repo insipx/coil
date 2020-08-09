@@ -39,7 +39,10 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 const JOB_TYPE: &'static str = stringify!(#name);
                 const ASYNC: bool = true;
 
-                async #fn_token perform_async(self, #env_pat: std::sync::Arc<Self::Environment>, conn: &mut sqlx::Transaction<'static, coil::sqlx::Postgres>) #return_type {
+                async #fn_token perform_async(self, #env_pat: std::sync::Arc<Self::Environment>, 
+                    conn: &mut sqlx::Transaction<'static, 
+                    coil::sqlx::Postgres>) #return_type 
+                {
                     let Self { #(#arg_names),* } = self;
                     #body
                 }

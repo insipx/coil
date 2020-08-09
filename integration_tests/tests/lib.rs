@@ -62,7 +62,7 @@ fn enqueue_5_jobs() {
     smol::run(async move {
         resize_image_with_env("tohru".to_string(), Size { height: 32, width: 32 }).enqueue(&pool).await.unwrap();
         resize_image_with_env("gambit".to_string(), Size { height: 64, width: 64 }).enqueue(&pool).await.unwrap();
-        resize_image_with_env("chess".to_string(), Size { height: 64, width: 128 }).enqueue(&pool).await.unwrap();
+        resize_image_with_env("chess".to_string(), Size { height: 128, width: 128 }).enqueue(&pool).await.unwrap();
         resize_image_with_env("kaguya".to_string(), Size { height: 256, width: 256 }).enqueue(&pool).await.unwrap();
         resize_image_with_env("L".to_string(), Size { height: 512, width: 512 }).enqueue(&pool).await.unwrap();
 

@@ -10,7 +10,6 @@
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-
 // You should have received a copy of the GNU General Public License
 // along with coil.  If not, see <http://www.gnu.org/licenses/>.
 
@@ -81,7 +80,7 @@ enum SyncOrAsync {
         fun: fn(Vec<u8>, &dyn Any, &mut Conn) -> Result<(), PerformError>
     },
     Async {
-        fun: for<'a> fn(Vec<u8>, Arc<(dyn Any + Send + Sync)>, &'a mut Conn) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>, PerformError>
+        fun: for<'a> fn(Vec<u8>, Arc<(dyn Any + Send + Sync)>, &'a mut Conn) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>
     }
 }
 
@@ -141,16 +140,18 @@ fn perform_async_job<'a, T: 'static + Job + Send>(
     data: Vec<u8>,
     env: Arc<(dyn Any + Sync + Send)>,
     conn: &'a mut Conn
-) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>, PerformError> {
-    let environment = env.downcast().unwrap(); 
-    /*ok_or_else::<PerformError, _>(|| {
-        "Incorrect environment type. This should never happen. \
-         Please open an issue at https://github.com/paritytech/coil/issues/new"
-            .into()
-    })?;
-    */
-    let data = rmp_serde::from_read(data.as_slice())?;
-    Ok(T::perform_async(data, environment, conn))
+) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>> {
+    async move {
+        let environment = match env.downcast() {
+            Ok(t) => t,
+            Err(_) => {
+                return Err(PerformError::from("Incorrect environment type. This should never happen. \
+             Please open an issue at https://github.com/paritytech/coil/issues/new"))
+            }
+        };
+        let data = rmp_serde::from_read(data.as_slice())?;
+        T::perform_async(data, environment, conn).await
+    }.boxed()
 }
 
 pub struct PerformJob<Env> {
@@ -178,8 +179,7 @@ impl<Env: 'static + Send + Sync> PerformJob<Env> {
             SyncOrAsync::Sync { fun } => {
                 fun(data, env, conn)
             },
-            SyncOrAsync::Async { fun } => {
-                // futures::executor::block_on(fun(data, env, conn)?)
+            SyncOrAsync::Async { .. } => {
                 panic!("Not Async");
             }
         }
@@ -192,7 +192,7 @@ impl<Env: 'static + Send + Sync> PerformJob<Env> {
     pub fn perform_async<'a>(
         &self,
         data: Vec<u8>, env: Arc<Env>, conn: &'a mut Conn 
-    ) -> Result<Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>, PerformError> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>> {
         match self.vtable.perform {
             SyncOrAsync::Sync { .. } => {
                 panic!("Not Sync");
