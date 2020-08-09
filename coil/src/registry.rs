@@ -84,15 +84,6 @@ enum SyncOrAsync {
     }
 }
 
-impl SyncOrAsync {
-    pub fn is_async(&self) -> bool {
-        match self {
-            SyncOrAsync::Async{..} => true,
-            _ => false
-        }
-    }
-}
-
 #[doc(hidden)]
 #[derive(Clone, Copy)]
 pub struct JobVTable {

@@ -121,9 +121,11 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
                 num_tasks - pending_messages
             };
             
+            let mut futures = Vec::with_capacity(jobs_to_queue);
             for _ in 0..jobs_to_queue {
-                self.run_single_job(tx.clone()).await?;
+                futures.push(self.run_single_job(tx.clone()))
             }
+            futures::future::join_all(futures).await;
             
             pending_messages += jobs_to_queue;
             let timeout = timer::Delay::new(std::time::Duration::from_secs(5));
@@ -174,8 +176,10 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
             })?;
         } else {
             self.pool.spawn_fifo(move || {
-                perform_fn.perform_sync(job.data, &env, &mut transaction).unwrap();
-                futures::executor::block_on(db::delete_succesful_job(&mut transaction, job.id)).unwrap();
+                match perform_fn.perform_sync(job.data, &env, &mut transaction) {
+                    Ok(_) => futures::executor::block_on(db::delete_succesful_job(&mut transaction, job.id)).unwrap(),
+                    Err(_) => futures::executor::block_on(db::update_failed_job(&mut transaction, job.id)).unwrap(),
+                }
                 futures::executor::block_on(transaction.commit()).unwrap();
             });
         }
