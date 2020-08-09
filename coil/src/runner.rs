@@ -18,24 +18,23 @@ use sqlx::PgPool;
 use futures::task::{Spawn, SpawnExt};
 use std::sync::Arc;
 use futures::{StreamExt, future::FutureExt};
-use crate::{db, error::*, registry::{Registry, PerformJob}};
+use crate::{db, error::*, registry::Registry};
 
 pub struct Builder<Env> {
     environment: Env,
     num_threads: Option<usize>,
     conn: sqlx::PgPool,
     executor: Arc<dyn Spawn>,
-    max_tasks: QueueAtOnce,
+    max_tasks: Option<usize>,
 }
 
 impl<Env: 'static> Builder<Env> {
     pub fn new(env: Env, executor: impl Spawn + 'static, conn: sqlx::PgPool) -> Self {
-        let max_tasks = QueueAtOnce::default();
         Self {
             environment: env,
             conn,
             executor: Arc::new(executor),
-            max_tasks,
+            max_tasks: None,
             num_threads: None,
         }
     }
@@ -45,8 +44,8 @@ impl<Env: 'static> Builder<Env> {
         self
     }
 
-    pub fn max_tasks(mut self, max_tasks: QueueAtOnce) -> Self {
-        self.max_tasks = max_tasks;
+    pub fn max_tasks(mut self, max_tasks: usize) -> Self {
+        self.max_tasks = Some(max_tasks);
         self
     }
 
@@ -56,13 +55,19 @@ impl<Env: 'static> Builder<Env> {
         } else {
             rayon::ThreadPoolBuilder::new().thread_name(|i| format!("bg-{}", i)).build()?
         };
+        let max_tasks = if let Some(max) = self.max_tasks {
+            max
+        } else {
+            pool.current_num_threads()
+        };
+        
         Ok(Runner {
             pool,
             executor: self.executor,
             conn: self.conn,
             environment: Arc::new(self.environment),
             registry: Arc::new(Registry::load()),
-            max_tasks: self.max_tasks
+            max_tasks 
         })
     }
 }
@@ -77,21 +82,7 @@ pub struct Runner<Env> {
     environment: Arc<Env>,
     registry: Arc<Registry<Env>>,
     /// maximum number of tasks to run at any one time
-    max_tasks: QueueAtOnce
-}
-
-/// How many syncronous jobs to queue at any one time
-pub enum QueueAtOnce {
-    /// Saturate each thread with the number of threads defined for the threadpool (num_cpus)
-    Threads,
-    /// Saturate threadpool with `size` jobs at any one time
-    Size(usize),
-}
-
-impl Default for QueueAtOnce {
-    fn default() -> QueueAtOnce {
-        QueueAtOnce::Size(500)
-    }
+    max_tasks: usize 
 }
 
 enum Event {
@@ -103,22 +94,15 @@ enum Event {
 impl<Env: Send + Sync + 'static> Runner<Env> {
 
     pub async fn run_all_pending_tasks(&self) -> Result<(), Error> {
-        let num_tasks = match self.max_tasks {
-            QueueAtOnce::Threads => {
-                self.pool.current_num_threads()
-            },
-            QueueAtOnce::Size(s) => s,
-        };
-        
-        let (tx, mut rx) = flume::bounded(num_tasks);
+        let (tx, mut rx) = flume::bounded(self.max_tasks);
 
         let mut pending_messages = 0;
         
         loop {
             let jobs_to_queue = if pending_messages == 0 {
-                num_tasks
+                self.max_tasks
             } else {
-                num_tasks - pending_messages
+                self.max_tasks - pending_messages
             };
             
             let mut futures = Vec::with_capacity(jobs_to_queue);
