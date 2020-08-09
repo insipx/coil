@@ -24,6 +24,8 @@ pub enum Error {
     Enqueue(#[from] EnqueueError),
     #[error(transparent)]
     Perform(#[from] PerformError),
+    #[error(transparent)]
+    Communication(#[from] CommError),
     #[error("error getting connection to db {0}")]
     SQL(#[from] sqlx::Error),
     #[error("Couldn't spawn onto executor {0}")]

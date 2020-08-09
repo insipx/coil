@@ -45,8 +45,18 @@ async fn resize_image(env: &Environment, id: u32, size: Size) -> Result<(), Erro
 }
 ```
 
+```rust
+	resize_image_with_env("tohru".to_string(), Size { height: 32, width: 32 }).enqueue(&pool).await;
+	let runner = coil::RunnerBuilder::new(env, Executor, pool)
+            .num_threads(8)
+            .build()
+            .unwrap();
+	runner.run_all_pending_tasks().await.unwrap()
+```
+
 ### Differences from [`swirl`](https://github.com/sgrif/swirl)
 - Supports asyncronous jobs/executors
 - Serializes data into Postgres with Messagepack instead of Json. Saves disk-space but doesn't allow for querying of job-data directly in SQL
 - In asyncronous jobs, database queries will be run asynchronously with SQLx
 - Migrations are included in the binary and exposed via a `migrate` fn. Results in less boilerplate setting up the database.
+- Enqueue is an async fn

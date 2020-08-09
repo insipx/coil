@@ -17,7 +17,7 @@
 use sqlx::PgPool;
 use futures::task::{Spawn, SpawnExt};
 use std::sync::Arc;
-use futures::{Stream, StreamExt};
+use futures::{StreamExt, future::FutureExt};
 use crate::{db, error::*, registry::Registry};
 
 pub struct Builder<Env> {
@@ -86,13 +86,11 @@ pub enum QueueAtOnce {
     Threads,
     /// Saturate threadpool with `size` jobs at any one time
     Size(usize),
-    /// Queue all jobs at once
-    All,
 }
 
 impl Default for QueueAtOnce {
     fn default() -> QueueAtOnce {
-        QueueAtOnce::All
+        QueueAtOnce::Size(500)
     }
 }
 
@@ -110,13 +108,6 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
                 self.pool.current_num_threads()
             },
             QueueAtOnce::Size(s) => s,
-            QueueAtOnce::All => {
-                if let Some(s) = db::get_max_tasks(&self.conn).await? {
-                    s as usize
-                } else {
-                    self.pool.current_num_threads()
-                }
-            }
         };
         
         let (tx, mut rx) = flume::bounded(num_tasks);
@@ -134,16 +125,18 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
                 self.run_single_job(tx.clone()).await?;
             }
             
-            while let Some(msg) = rx.next().await {
-                if pending_messages == 0 {
-                    continue;
-                }
-                match msg {
-                    Event::Working => pending_messages -= 1,
-                    Event::NoJobAvailable => return Ok(()),
-                    // error handling
-                }
-            }
+            pending_messages += jobs_to_queue;
+            let timeout = timer::Delay::new(std::time::Duration::from_secs(5));
+            futures::select!{
+                msg = rx.next() => {
+                    match msg {
+                        Some(Event::Working) => pending_messages -=1,
+                        Some(Event::NoJobAvailable) => return Ok(()),
+                        None => return Err(CommError::NoMessage.into())
+                    }
+                },
+                _ = timeout.fuse() => return Err(CommError::NoMessage.into())
+            };
         }
     }
 
@@ -185,7 +178,4 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
         Ok(())
     }
 }
-
-
-
 
