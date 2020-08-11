@@ -46,12 +46,12 @@ async fn resize_image(env: &Environment, id: u32, size: Size) -> Result<(), Erro
 ```
 
 ```rust
-	resize_image_with_env("tohru".to_string(), Size { height: 32, width: 32 }).enqueue(&pool).await;
-	let runner = coil::RunnerBuilder::new(env, Executor, pool)
-            .num_threads(8)
-            .build()
-            .unwrap();
-	runner.run_all_pending_tasks().await.unwrap()
+resize_image_with_env("tohru".to_string(), Size { height: 32, width: 32 }).enqueue(&pool).await;
+let runner = coil::RunnerBuilder::new(env, Executor, pool)
+    .num_threads(8)
+    .build()
+    .unwrap();
+runner.run_all_pending_tasks().await.unwrap()
 ```
 
 ### Differences from [`swirl`](https://github.com/sgrif/swirl)

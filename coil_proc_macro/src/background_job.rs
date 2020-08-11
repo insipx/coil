@@ -20,79 +20,55 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
     let fn_args = job.args.iter();
     let struct_def = job.args.struct_def();
     let struct_assign = job.args.struct_assign();
-    let arg_names = job.args.names();
+    let arg_names_0 = job.args.names();
+    let arg_names_1 = job.args.names();
     let return_type = job.return_type;
     let body = connection_arg.wrap(job.body);
-    
-    let res = if job.is_async {
-        quote! {
-            #(#attrs)*
-            #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
-                #name :: Job {
-                    #(#struct_assign),*
-                }
-            }
+    let is_async = job.is_async;    
 
-            #[coil::async_trait::async_trait] 
-            impl coil::Job for #name :: Job {
-                type Environment = #env_type;
-                const JOB_TYPE: &'static str = stringify!(#name);
-                const ASYNC: bool = true;
-
-                async #fn_token perform_async(self, #env_pat: std::sync::Arc<Self::Environment>, 
-                    conn: &mut sqlx::Transaction<'static, 
-                    coil::sqlx::Postgres>) #return_type 
-                {
-                    let Self { #(#arg_names),* } = self;
-                    #body
-                }
-            }
-
-            mod #name {
-                use super::*;
-
-                #[derive(coil::Serialize, coil::Deserialize)]
-                #[serde(crate = "coil::serde")]
-                pub struct Job {
-                    #(#struct_def),*
-                }
-
-                coil::register_job!(Job);
+    let res = quote! {
+        #(#attrs)*
+        #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
+            #name :: Job {
+                #(#struct_assign),*
             }
         }
-    } else {
-        quote! {
-            #(#attrs)*
-            #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
-                #name :: Job {
-                    #(#struct_assign),*
-                }
+
+        #[coil::async_trait::async_trait] 
+        impl coil::Job for #name :: Job {
+            type Environment = #env_type;
+            const JOB_TYPE: &'static str = stringify!(#name);
+            const ASYNC: bool = #is_async;
+
+            async #fn_token perform_async(self, 
+                #env_pat: std::sync::Arc<Self::Environment>, 
+                conn: &mut sqlx::Transaction<'static, 
+                coil::sqlx::Postgres>
+            ) #return_type 
+            {
+                let Self { #(#arg_names_0),* } = self;
+                #body
             }
 
-            impl coil::Job for #name :: Job {
-                type Environment = #env_type;
-                const JOB_TYPE: &'static str = stringify!(#name);
-                const ASYNC: bool = false;
+            #fn_token perform(self, #env_pat: &Self::Environment, conn: &mut sqlx::Transaction<'static, coil::sqlx::Postgres>) #return_type {
+                let Self { #(#arg_names_1),* } = self;
+                #body
+            }
+        }
 
-                #fn_token perform(self, #env_pat: &Self::Environment, conn: &mut sqlx::Transaction<'static, coil::sqlx::Postgres>) #return_type {
-                    let Self { #(#arg_names),* } = self;
-                    #body
-                }
+        mod #name {
+            use super::*;
+
+            #[derive(coil::Serialize, coil::Deserialize)]
+            #[serde(crate = "coil::serde")]
+            pub struct Job {
+                #(#struct_def),*
             }
 
-            mod #name {
-                use super::*;
-
-                #[derive(coil::Serialize, coil::Deserialize)]
-                #[serde(crate = "coil::serde")]
-                pub struct Job {
-                    #(#struct_def),*
-                }
-
-                coil::register_job!(Job);
-            }
+            coil::register_job!(Job);
         }
     };
+
     Ok(res)
 }
 
@@ -156,7 +132,7 @@ impl BackgroundJob {
         let return_type = sig.output.clone();
         let ident = sig.ident.clone();
         let job_args = JobArgs::try_from(sig)?;
-
+        
         Ok(Self {
             attrs,
             visibility: vis,
@@ -221,7 +197,7 @@ impl JobArgs {
                 (_, _, Arg::Connection(_)) => {
                     return Err(
                         span.error("Multiple database connection arguments")
-                            .help("To take a connection pool as an argument instead of a single connection, use the type `&dyn coil::db::DieselPoolObj`")
+                            .help("Put a connection pool in the environment instead of accepting it as an argument")
                     );
                 }
                 (_, _, Arg::Normal(pat_type)) => args.push(pat_type),
