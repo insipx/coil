@@ -26,6 +26,8 @@ pub extern crate serde;
 #[doc(hidden)]
 pub extern crate inventory;
 #[doc(hidden)]
+pub extern crate linkme;
+#[doc(hidden)]
 pub extern crate async_trait;
 #[doc(hidden)]
 pub extern crate sqlx;
@@ -33,7 +35,7 @@ pub extern crate sqlx;
 pub use serde_derive::{Deserialize, Serialize};
 
 #[doc(hidden)]
-pub use registry::JobVTable;
+pub use registry::{JobVTable, JOBS};
 
 pub use crate::job::*;
 pub use crate::error::*;

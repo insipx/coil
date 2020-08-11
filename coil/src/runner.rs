@@ -17,6 +17,7 @@
 use sqlx::PgPool;
 use futures::task::{Spawn, SpawnExt};
 use std::sync::Arc;
+use crate::job::Job;
 use futures::{StreamExt, future::FutureExt};
 use crate::{db, error::*, registry::Registry};
 
@@ -26,6 +27,7 @@ pub struct Builder<Env> {
     conn: sqlx::PgPool,
     executor: Arc<dyn Spawn>,
     max_tasks: Option<usize>,
+    // registry: HashMap<&'static
 }
 
 impl<Env: 'static> Builder<Env> {
@@ -36,6 +38,7 @@ impl<Env: 'static> Builder<Env> {
             executor: Arc::new(executor),
             max_tasks: None,
             num_threads: None,
+            // registry: HashMap::new(),
         }
     }
 
@@ -47,6 +50,10 @@ impl<Env: 'static> Builder<Env> {
     pub fn max_tasks(mut self, max_tasks: usize) -> Self {
         self.max_tasks = Some(max_tasks);
         self
+    }
+
+    pub fn register_job<T: 'static + Job + Send>(mut self) {
+        todo!();
     }
 
     pub fn build(self) -> Result<Runner<Env>, Error> {
@@ -66,6 +73,7 @@ impl<Env: 'static> Builder<Env> {
             executor: self.executor,
             conn: self.conn,
             environment: Arc::new(self.environment),
+            // registry: self.registry,
             registry: Arc::new(Registry::load()),
             max_tasks 
         })

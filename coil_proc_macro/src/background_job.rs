@@ -38,14 +38,26 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 type Environment = #env_type;
                 const JOB_TYPE: &'static str = stringify!(#name);
                 const ASYNC: bool = true;
+                const VTABLE: fn() -> coil::JobVTable = Self::get_vtable;
 
-                async #fn_token perform_async(self, #env_pat: std::sync::Arc<Self::Environment>, 
+                async #fn_token perform_async(self, 
+                    #env_pat: std::sync::Arc<Self::Environment>, 
                     conn: &mut sqlx::Transaction<'static, 
-                    coil::sqlx::Postgres>) #return_type 
+                    coil::sqlx::Postgres>
+                ) #return_type 
                 {
                     let Self { #(#arg_names),* } = self;
                     #body
                 }
+
+                fn get_vtable() -> coil::JobVTable {
+                    coil::JobVTable::from_job::<#name :: Job>()
+                }
+            }
+             
+            #[coil::linkme::distributed_slice(coil::JOBS)]
+            fn get_vtable() -> coil::JobVTable { 
+                <#name :: Job as coil::Job>::get_vtable()
             }
 
             mod #name {
@@ -56,8 +68,6 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 pub struct Job {
                     #(#struct_def),*
                 }
-
-                coil::register_job!(Job);
             }
         }
     } else {
@@ -89,7 +99,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                     #(#struct_def),*
                 }
 
-                coil::register_job!(Job);
+                // coil::register_job!(Job);
             }
         }
     };

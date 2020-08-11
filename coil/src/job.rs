@@ -26,7 +26,9 @@ pub trait Job: Serialize + DeserializeOwned {
     type Environment: 'static + Send + Sync;
     const JOB_TYPE: &'static str;
     #[doc(hidden)] 
-    const ASYNC: bool;    
+    const ASYNC: bool;
+    #[doc(hidden)]
+    const VTABLE: fn() -> crate::registry::JobVTable;
 
     /// inserts the job into the Postgres Database
     async fn enqueue(self, pool: &PgPool) -> Result<(), EnqueueError> {
@@ -45,4 +47,7 @@ pub trait Job: Serialize + DeserializeOwned {
     async fn perform_async(self, _: Arc<Self::Environment>, _: &mut Conn) -> Result<(), PerformError> {
         Err(PerformError::WrongJob)
     }
+
+    #[doc(hidden)]
+    fn get_vtable() -> crate::registry::JobVTable;
 }

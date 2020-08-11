@@ -26,6 +26,10 @@ use std::sync::Arc;
 use sqlx::prelude::*;
 use sqlx::Postgres;
 
+#[doc(hidden)]
+#[linkme::distributed_slice]
+pub static JOBS: [fn() -> JobVTable] = [..];
+
 type Conn = sqlx::Transaction<'static, Postgres>;
 
 #[derive(Default)]
@@ -38,6 +42,12 @@ pub struct Registry<Env> {
 }
 
 impl<Env: 'static> Registry<Env> {
+    
+    pub fn register_job(&mut self, job: impl Job + 'static + Send) {
+        let vtable = JobVTable::from_real_job(job);
+        self.jobs.insert(vtable.job_type, vtable);
+    }
+
     /// Loads the registry from all invocations of [`register_job!`] for this
     /// environment type
     pub fn load() -> Self {
@@ -110,6 +120,10 @@ impl JobVTable {
             job_type: T::JOB_TYPE,
             perform,
         }
+    }
+
+    fn from_real_job<T: 'static + Job + Send>(job: T) -> Self {
+        Self::from_job::<T>()
     }
 }
 

@@ -1,7 +1,7 @@
 
 use serde::{Serialize, Deserialize};
 use coil::Job;
-
+/*
 #[test]
 fn it_works() {
     assert_eq!(2 + 2, 4);
@@ -28,23 +28,25 @@ async fn resize_image(file_name: String, dimensions: Size) -> Result<(), coil::P
     println!("Hello");
     Ok(())
 }
+*/
 
 #[coil::background_job]
-async fn resize_image_with_env(env: &Environment, file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
-    println!("File Name: {}, height: {}, width: {}", file_name, dimensions.height, dimensions.width);
+async fn resize_image_with_env(name: String) -> Result<(), coil::PerformError> {
+    // println!("File Name: {}, height: {}, width: {}", file_name, dimensions.height, dimensions.width);
+    println!("{}", name);
     Ok(())
 }
 
+/*(
 struct Executor;
-
 impl futures::task::Spawn for Executor {
-    
     fn spawn_obj(&self, future: futures::task::FutureObj<'static, ()>) -> Result<(), futures::task::SpawnError> {
         smol::Task::spawn(future).detach();
         Ok(())
     }
 }
-
+*/
+/*
 #[test]
 fn enqueue_simple_task() {
     let pool = smol::block_on(sqlx::PgPool::connect("postgres://archive:default@localhost:5432/test_job_queue")).unwrap();
@@ -97,4 +99,4 @@ fn enqueue_5_jobs_limited_size() {
     });
     
 }
-
+*/
