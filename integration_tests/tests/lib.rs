@@ -1,7 +1,7 @@
 
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use coil::Job;
-/*
+
 #[test]
 fn it_works() {
     assert_eq!(2 + 2, 4);
@@ -17,27 +17,37 @@ pub struct Environment {
     conn: sqlx::PgPool
 }
 
+/*
 #[coil::background_job]
 fn resize_image_sync(file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
     println!("Hello");
     Ok(())
 }
-
+*/
+/*
 #[coil::background_job] 
 async fn resize_image(file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
     println!("Hello");
     Ok(())
 }
 */
+/*
+#[coil::background_job]
+async fn resize_image_with_env<E: Serialize + DeserializeOwned + 'static + Send>(name: String, some: E) -> Result<(), coil::PerformError> {
+    // println!("File Name: {}, height: {}, width: {}", file_name, dimensions.height, dimensions.width);
+    println!("{}", name);
+    Ok(())
+}
+*/
 
 #[coil::background_job]
-async fn resize_image_with_env(name: String) -> Result<(), coil::PerformError> {
+async fn resize_image(name: String) -> Result<(), coil::PerformError> {
     // println!("File Name: {}, height: {}, width: {}", file_name, dimensions.height, dimensions.width);
     println!("{}", name);
     Ok(())
 }
 
-/*(
+
 struct Executor;
 impl futures::task::Spawn for Executor {
     fn spawn_obj(&self, future: futures::task::FutureObj<'static, ()>) -> Result<(), futures::task::SpawnError> {
@@ -45,7 +55,7 @@ impl futures::task::Spawn for Executor {
         Ok(())
     }
 }
-*/
+
 /*
 #[test]
 fn enqueue_simple_task() {
@@ -76,7 +86,7 @@ fn enqueue_5_jobs() {
         println!("Finished");
     });
 }
-
+*/
 #[test]
 fn enqueue_5_jobs_limited_size() {
     let pool = smol::block_on(sqlx::PgPool::connect("postgres://archive:default@localhost:5432/test_job_queue")).unwrap();
@@ -84,14 +94,15 @@ fn enqueue_5_jobs_limited_size() {
         conn: pool.clone()
     };
     smol::run(async move {
-        resize_image_with_env("tohru".to_string(), Size { height: 32, width: 32 }).enqueue(&pool).await.unwrap();
-        resize_image_with_env("gambit".to_string(), Size { height: 64, width: 64 }).enqueue(&pool).await.unwrap();
-        resize_image_with_env("chess".to_string(), Size { height: 128, width: 128 }).enqueue(&pool).await.unwrap();
-        resize_image_with_env("kaguya".to_string(), Size { height: 256, width: 256 }).enqueue(&pool).await.unwrap();
-        resize_image_with_env("L".to_string(), Size { height: 512, width: 512 }).enqueue(&pool).await.unwrap();
+        resize_image("tohru".to_string()).enqueue(&pool).await.unwrap();
+        resize_image("gambit".to_string()).enqueue(&pool).await.unwrap();
+        resize_image("chess".to_string()).enqueue(&pool).await.unwrap();
+        resize_image("kaguya".to_string()).enqueue(&pool).await.unwrap();
+        resize_image("L".to_string()).enqueue(&pool).await.unwrap();
 
         let runner = coil::RunnerBuilder::new(env, Executor, pool)
             .num_threads(8)
+            .register_job::<resize_image::Job>()
             .build()
             .unwrap();
         runner.run_all_pending_tasks().await.unwrap();
@@ -99,4 +110,4 @@ fn enqueue_5_jobs_limited_size() {
     });
     
 }
-*/
+

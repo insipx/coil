@@ -32,7 +32,7 @@ pub extern crate async_trait;
 #[doc(hidden)]
 pub extern crate sqlx;
 #[doc(hidden)]
-pub use serde_derive::{Deserialize, Serialize};
+pub use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[doc(hidden)]
 pub use registry::{JobVTable, JOBS};

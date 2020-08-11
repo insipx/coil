@@ -27,7 +27,7 @@ pub struct Builder<Env> {
     conn: sqlx::PgPool,
     executor: Arc<dyn Spawn>,
     max_tasks: Option<usize>,
-    // registry: HashMap<&'static
+    registry: Registry<Env>,
 }
 
 impl<Env: 'static> Builder<Env> {
@@ -38,8 +38,14 @@ impl<Env: 'static> Builder<Env> {
             executor: Arc::new(executor),
             max_tasks: None,
             num_threads: None,
-            // registry: HashMap::new(),
+            registry: Registry::new(),
         }
+    }
+    
+    /// Jobs 
+    pub fn register_job<T: Job + 'static + Send>(mut self) -> Self {
+        self.registry.register_job::<T>();
+        self
     }
 
     pub fn num_threads(mut self, threads: usize) -> Self {
@@ -50,10 +56,6 @@ impl<Env: 'static> Builder<Env> {
     pub fn max_tasks(mut self, max_tasks: usize) -> Self {
         self.max_tasks = Some(max_tasks);
         self
-    }
-
-    pub fn register_job<T: 'static + Job + Send>(mut self) {
-        todo!();
     }
 
     pub fn build(self) -> Result<Runner<Env>, Error> {
@@ -73,8 +75,8 @@ impl<Env: 'static> Builder<Env> {
             executor: self.executor,
             conn: self.conn,
             environment: Arc::new(self.environment),
-            // registry: self.registry,
-            registry: Arc::new(Registry::load()),
+            registry: Arc::new(self.registry),
+            // registry: Arc::new(Registry::load()),
             max_tasks 
         })
     }
@@ -159,10 +161,14 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
         // need to unwind this 
         if perform_fn.is_async() {
             self.executor.spawn(async move {
+                println!("Spawned");
                 let res = perform_fn.perform_async(job.data, env, &mut transaction).await;
                 match  res {
                     Ok(_) => db::delete_succesful_job(&mut transaction, job.id).await.unwrap(),
-                    Err(_) => db::update_failed_job(&mut transaction, job.id).await.unwrap(),
+                    Err(e) => {
+                        println!("{:?}", e);
+                        db::update_failed_job(&mut transaction, job.id).await.unwrap()
+                    },
                 }
                 transaction.commit().await.unwrap();
             })?;

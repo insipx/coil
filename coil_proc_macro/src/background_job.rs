@@ -20,86 +20,50 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
     let fn_args = job.args.iter();
     let struct_def = job.args.struct_def();
     let struct_assign = job.args.struct_assign();
-    let arg_names = job.args.names();
+    let arg_names_0 = job.args.names();
+    let arg_names_1 = job.args.names();
     let return_type = job.return_type;
     let body = connection_arg.wrap(job.body);
-    
-    let res = if job.is_async {
-        quote! {
-            #(#attrs)*
-            #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
-                #name :: Job {
-                    #(#struct_assign),*
-                }
-            }
+    let (impl_generics, ty_generics, where_clause) = job.generics.split_for_impl();
+    let is_async = job.is_async;
 
-            #[coil::async_trait::async_trait] 
-            impl coil::Job for #name :: Job {
-                type Environment = #env_type;
-                const JOB_TYPE: &'static str = stringify!(#name);
-                const ASYNC: bool = true;
-                const VTABLE: fn() -> coil::JobVTable = Self::get_vtable;
-
-                async #fn_token perform_async(self, 
-                    #env_pat: std::sync::Arc<Self::Environment>, 
-                    conn: &mut sqlx::Transaction<'static, 
-                    coil::sqlx::Postgres>
-                ) #return_type 
-                {
-                    let Self { #(#arg_names),* } = self;
-                    #body
-                }
-
-                fn get_vtable() -> coil::JobVTable {
-                    coil::JobVTable::from_job::<#name :: Job>()
-                }
-            }
-             
-            #[coil::linkme::distributed_slice(coil::JOBS)]
-            fn get_vtable() -> coil::JobVTable { 
-                <#name :: Job as coil::Job>::get_vtable()
-            }
-
-            mod #name {
-                use super::*;
-
-                #[derive(coil::Serialize, coil::Deserialize)]
-                #[serde(crate = "coil::serde")]
-                pub struct Job {
-                    #(#struct_def),*
-                }
+    let res = quote! {
+        #(#attrs)*
+        #vis #fn_token #name #impl_generics (#(#fn_args),*) -> #name :: Job #ty_generics #where_clause {
+            #name :: Job {
+                #(#struct_assign),*
             }
         }
-    } else {
-        quote! {
-            #(#attrs)*
-            #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
-                #name :: Job {
-                    #(#struct_assign),*
-                }
+
+        #[coil::async_trait::async_trait] 
+        impl #impl_generics coil::Job for #name :: Job #ty_generics #where_clause {
+            type Environment = #env_type;
+            const JOB_TYPE: &'static str = stringify!(#name);
+            const ASYNC: bool = #is_async;
+
+            async #fn_token perform_async(self, 
+                #env_pat: std::sync::Arc<Self::Environment>, 
+                conn: &mut sqlx::Transaction<'static, 
+                coil::sqlx::Postgres>
+            ) #return_type 
+            {
+                let Self { #(#arg_names_0),* } = self;
+                #body
             }
 
-            impl coil::Job for #name :: Job {
-                type Environment = #env_type;
-                const JOB_TYPE: &'static str = stringify!(#name);
-                const ASYNC: bool = false;
-
-                #fn_token perform(self, #env_pat: &Self::Environment, conn: &mut sqlx::Transaction<'static, coil::sqlx::Postgres>) #return_type {
-                    let Self { #(#arg_names),* } = self;
-                    #body
-                }
+            #fn_token perform(self, #env_pat: &Self::Environment, conn: &mut sqlx::Transaction<'static, coil::sqlx::Postgres>) #return_type {
+                let Self { #(#arg_names_1),* } = self;
+                #body
             }
+        }
+        
+        mod #name {
+            use super::*;
 
-            mod #name {
-                use super::*;
-
-                #[derive(coil::Serialize, coil::Deserialize)]
-                #[serde(crate = "coil::serde")]
-                pub struct Job {
-                    #(#struct_def),*
-                }
-
-                // coil::register_job!(Job);
+            #[derive(coil::Serialize, coil::Deserialize)]
+            #[serde(crate = "coil::serde")]
+            pub struct Job #ty_generics #where_clause {
+                #(#struct_def),*
             }
         }
     };
@@ -115,6 +79,7 @@ struct BackgroundJob {
     args: JobArgs,
     return_type: syn::ReturnType,
     body: Vec<syn::Stmt>,
+    generics: syn::Generics
 }
 
 impl BackgroundJob {
@@ -148,14 +113,14 @@ impl BackgroundJob {
                 .span()
                 .error("#[coil::background_job] cannot be used on functions with an abi"));
         }
-
+        /*
         if !sig.generics.params.is_empty() {
             return Err(sig
                 .generics
                 .span()
                 .error("#[coil::background_job] cannot be used on generic functions"));
         }
-
+        */
         if let Some(where_clause) = sig.generics.where_clause {
             return Err(where_clause.where_token.span.error(
                 "#[coil::background_job] cannot be used on functions with a where clause",
@@ -165,6 +130,7 @@ impl BackgroundJob {
         let fn_token = sig.fn_token;
         let return_type = sig.output.clone();
         let ident = sig.ident.clone();
+        let generics = sig.generics.clone();
         let job_args = JobArgs::try_from(sig)?;
 
         Ok(Self {
@@ -176,6 +142,7 @@ impl BackgroundJob {
             return_type,
             body: block.stmts,
             is_async,
+            generics,
         })
     }
 }

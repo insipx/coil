@@ -28,7 +28,7 @@ use sqlx::Postgres;
 
 #[doc(hidden)]
 #[linkme::distributed_slice]
-pub static JOBS: [fn() -> JobVTable] = [..];
+pub static JOBS: [JobVTable] = [..];
 
 type Conn = sqlx::Transaction<'static, Postgres>;
 
@@ -43,9 +43,17 @@ pub struct Registry<Env> {
 
 impl<Env: 'static> Registry<Env> {
     
-    pub fn register_job(&mut self, job: impl Job + 'static + Send) {
-        let vtable = JobVTable::from_real_job(job);
-        self.jobs.insert(vtable.job_type, vtable);
+    pub fn new() -> Self {
+        Self {
+            jobs: HashMap::new(),
+            _marker: PhantomData
+        }
+    }
+
+    pub fn register_job<T: Job + 'static + Send>(&mut self) {
+        println!("Registering job {}", T::JOB_TYPE);
+        self.jobs.insert(T::JOB_TYPE, JobVTable::from_job::<T>());
+        println!("Registered");
     }
 
     /// Loads the registry from all invocations of [`register_job!`] for this
@@ -115,15 +123,12 @@ impl JobVTable {
                 fun: perform_sync_job::<T>,
             }
         };
+        println!("Type Id: {:?}", TypeId::of::<T::Environment>());
         Self {
             env_type: TypeId::of::<T::Environment>(),
             job_type: T::JOB_TYPE,
             perform,
         }
-    }
-
-    fn from_real_job<T: 'static + Job + Send>(job: T) -> Self {
-        Self::from_job::<T>()
     }
 }
 
