@@ -119,7 +119,7 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
                         Some(Event::Working) => pending_messages -=1,
                         Some(Event::NoJobAvailable) => return Ok(()),
                         None => return Err(CommError::NoMessage.into()),
-                        _ => println!(" Fuck my shit up why don't you ")
+                        _ => unimplemented!()
                     }
                 },
                 _ = timeout.fuse() => return Err(CommError::NoMessage.into())

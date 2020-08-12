@@ -88,9 +88,15 @@ fn enqueue_5_jobs_limited_size() {
         resize_image_with_env("chess".to_string(), Size { height: 128, width: 128 }).enqueue(&pool).await.unwrap();
         resize_image_with_env("kaguya".to_string(), Size { height: 256, width: 256 }).enqueue(&pool).await.unwrap();
         resize_image_with_env("L".to_string(), Size { height: 512, width: 512 }).enqueue(&pool).await.unwrap();
+        resize_image_with_env("sinks".to_string(), Size { height: 32, width: 32 }).enqueue(&pool).await.unwrap();
+        resize_image_with_env("polkadotstingray".to_string(), Size { height: 64, width: 64 }).enqueue(&pool).await.unwrap();
+        resize_image_with_env("zutomayo".to_string(), Size { height: 128, width: 128 }).enqueue(&pool).await.unwrap();
+        resize_image_with_env("zzz".to_string(), Size { height: 256, width: 256 }).enqueue(&pool).await.unwrap();
+        resize_image_with_env("xix".to_string(), Size { height: 512, width: 512 }).enqueue(&pool).await.unwrap();
 
         let runner = coil::RunnerBuilder::new(env, Executor, pool)
             .num_threads(8)
+            .max_tasks(3)
             .build()
             .unwrap();
         runner.run_all_pending_tasks().await.unwrap();
