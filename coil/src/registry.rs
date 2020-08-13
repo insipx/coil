@@ -23,12 +23,7 @@ use crate::error::PerformError;
 use crate::job::Job;
 use std::pin::Pin;
 use std::sync::Arc;
-use sqlx::prelude::*;
 use sqlx::Postgres;
-
-#[doc(hidden)]
-#[linkme::distributed_slice]
-pub static JOBS: [JobVTable] = [..];
 
 type Conn = sqlx::Transaction<'static, Postgres>;
 
@@ -43,13 +38,6 @@ pub struct Registry<Env> {
 
 impl<Env: 'static> Registry<Env> {
     
-    pub fn new() -> Self {
-        Self {
-            jobs: HashMap::new(),
-            _marker: PhantomData
-        }
-    }
-
     pub fn register_job<T: Job + 'static + Send>(&mut self) {
         println!("Registering job {}", T::JOB_TYPE);
         println!("{:?} : {:?}", TypeId::of::<T::Environment>(), TypeId::of::<Env>());

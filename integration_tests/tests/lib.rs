@@ -121,7 +121,6 @@ fn enqueue_5_jobs_limited_size() {
         let runner = coil::RunnerBuilder::new((), Executor, pool)
             .num_threads(8)
             .max_tasks(3)
-            .register_job::<resize_image::Job>()
             .build()
             .unwrap();
         runner.run_all_pending_tasks().await.unwrap();

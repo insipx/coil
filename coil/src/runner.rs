@@ -38,11 +38,30 @@ impl<Env: 'static> Builder<Env> {
             executor: Arc::new(executor),
             max_tasks: None,
             num_threads: None,
-            registry: Registry::new(),
+            registry: Registry::load(),
         }
     }
     
-    /// Jobs 
+    ///  Register a job that hasn't or can't be registered by invoking the `register_job!` macro
+    ///
+    /// Jobs that include generics must use this function in order to be registered with a runner.
+    /// Jobs must be registered with every generic that is used.
+    /// Jobs are available in the format `my_function_name::Job`.
+    ///
+    ///  # Example
+    ///  ```
+    ///  RunnerBuilder::new(env, executor, conn)
+    ///      .register_job::<resize_image::Job<String>>()
+    ///  ```
+    ///  Register a job for every generic (if they differ):
+    ///
+    ///  ```
+    ///  RunnerBuilder::new(env, executor, conn)
+    ///     .register_job::<resize_image::Job<String>>()
+    ///     .register_job::<resize_image::Job<u32>>()
+    ///     .register_job::<resize_image::Job<MyStruct>()
+    ///  ```
+    ///
     pub fn register_job<T: Job + 'static + Send>(mut self) -> Self {
         self.registry.register_job::<T>();
         self
