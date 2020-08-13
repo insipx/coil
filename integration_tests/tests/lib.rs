@@ -1,6 +1,5 @@
-
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use coil::Job;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[test]
 fn it_works() {
@@ -14,7 +13,7 @@ struct Size {
 }
 
 pub struct Environment {
-    conn: sqlx::PgPool
+    conn: sqlx::PgPool,
 }
 
 /*
@@ -25,7 +24,7 @@ fn resize_image_sync(file_name: String, dimensions: Size) -> Result<(), coil::Pe
 }
 */
 /*
-#[coil::background_job] 
+#[coil::background_job]
 async fn resize_image(file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
     println!("Hello");
     Ok(())
@@ -45,7 +44,6 @@ fn resize_image(name: String) -> Result<(), coil::PerformError> {
     println!("{}", name);
     Ok(())
 }
-
 
 struct Executor;
 impl futures::task::Spawn for Executor {
@@ -86,29 +84,103 @@ fn enqueue_5_jobs() {
     });
 }
 */
+
 #[test]
 fn enqueue_5_jobs_limited_size() {
-    let pool = smol::block_on(sqlx::PgPool::connect("postgres://archive:default@localhost:5432/test_job_queue")).unwrap();
-    /*
-    let env = Environment {
-        conn: pool.clone()
-    };
-    */
+    let pool = smol::block_on(sqlx::PgPool::connect(
+        "postgres://archive:default@localhost:5432/test_job_queue",
+    ))
+    .unwrap();
+    let env = Environment { conn: pool.clone() };
     smol::run(async move {
-        resize_image("tohru".to_string()).enqueue(&pool).await.unwrap();
-        resize_image("gambit".to_string()).enqueue(&pool).await.unwrap();
-        resize_image("chess".to_string()).enqueue(&pool).await.unwrap();
-        resize_image("kaguya".to_string()).enqueue(&pool).await.unwrap();
-        resize_image("L".to_string()).enqueue(&pool).await.unwrap();
+        resize_image_with_env("tohru".to_string(), Size { height: 32, width: 32 })
+            .enqueue(&pool)
+            .await
+            .unwrap();
+        resize_image_with_env("gambit".to_string(), Size { height: 64, width: 64 })
+            .enqueue(&pool)
+            .await
+            .unwrap();
+        resize_image_with_env(
+            "chess".to_string(),
+            Size {
+                height: 128,
+                width: 128,
+            },
+        )
+        .enqueue(&pool)
+        .await
+        .unwrap();
+        resize_image_with_env(
+            "kaguya".to_string(),
+            Size {
+                height: 256,
+                width: 256,
+            },
+        )
+        .enqueue(&pool)
+        .await
+        .unwrap();
+        resize_image_with_env(
+            "L".to_string(),
+            Size {
+                height: 512,
+                width: 512,
+            },
+        )
+        .enqueue(&pool)
+        .await
+        .unwrap();
 
-        let runner = coil::RunnerBuilder::new((), Executor, pool)
+        resize_image_with_env("sinks".to_string(), Size { height: 32, width: 32 })
+            .enqueue(&pool)
+            .await
+            .unwrap();
+
+        resize_image_with_env("polkadotstingray".to_string(), Size { height: 64, width: 64 })
+            .enqueue(&pool)
+            .await
+            .unwrap();
+
+        resize_image_with_env(
+            "zutomayo".to_string(),
+            Size {
+                height: 128,
+                width: 128,
+            },
+        )
+        .enqueue(&pool)
+        .await
+        .unwrap();
+
+        resize_image_with_env(
+            "zzz".to_string(),
+            Size {
+                height: 256,
+                width: 256,
+            },
+        )
+        .enqueue(&pool)
+        .await
+        .unwrap();
+
+        resize_image_with_env(
+            "xix".to_string(),
+            Size {
+                height: 512,
+                width: 512,
+            },
+        )
+        .enqueue(&pool)
+        .await
+        .unwrap();
+
+        let runner = coil::RunnerBuilder::new(env, Executor, pool)
             .num_threads(8)
-            .register_job::<resize_image::Job>()
+            .max_tasks(3)
             .build()
             .unwrap();
         runner.run_all_pending_tasks().await.unwrap();
         println!("Finished");
     });
-    
 }
-

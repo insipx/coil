@@ -30,6 +30,8 @@ pub enum Error {
     SQL(#[from] sqlx::Error),
     #[error("Couldn't spawn onto executor {0}")]
     Spawn(#[from] futures::task::SpawnError),
+    #[error("Migrations could not be run {0}")]
+    Migrate(#[from] sqlx::migrate::MigrateError)
 }
 
 #[derive(Debug, Error)]

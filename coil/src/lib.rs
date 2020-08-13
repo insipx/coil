@@ -39,5 +39,6 @@ pub use registry::{JobVTable, JOBS};
 
 pub use crate::job::*;
 pub use crate::error::*;
+pub use crate::db::migrate;
 pub use coil_proc_macro::*;
 pub use crate::runner::Builder as RunnerBuilder;

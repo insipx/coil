@@ -17,7 +17,7 @@
 //! Database Operations for getting and deleting jobs
 
 use crate::job::Job;
-use crate::error::EnqueueError;
+use crate::error::{EnqueueError, Error};
 use sqlx::prelude::*;
 use sqlx::Postgres;
 
@@ -27,6 +27,11 @@ pub struct BackgroundJob {
     pub id: i64,
     pub job_type: String,
     pub data: Vec<u8>,
+}
+
+/// Run the migrations for the background Tasks
+pub async fn migrate(pool: impl Acquire<'_, Database=Postgres>) -> Result<(), Error> {
+    sqlx::migrate!("src/migrations/").run(pool).await.map_err(Into::into)
 }
 
 pub async fn enqueue_job<T: Job>(conn: impl Executor<'_, Database=Postgres>, job: T) -> Result<(), EnqueueError> {
