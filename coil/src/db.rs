@@ -23,6 +23,7 @@ use sqlx::Postgres;
 
 // TODO: functionality for retrying failed jobs
 
+#[derive(FromRow)]
 pub struct BackgroundJob {
     pub id: i64,
     pub job_type: String,
