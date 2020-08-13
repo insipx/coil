@@ -33,7 +33,7 @@ pub trait Job: Serialize + DeserializeOwned {
         crate::db::enqueue_job(pool, self).await
     }
     
-    /// Logic for actually running a synchronous job
+    /// Logic for running a synchronous job
     #[doc(hidden)] 
     fn perform(self, _: &Self::Environment, _: &mut Conn) -> Result<(), PerformError> 
     {

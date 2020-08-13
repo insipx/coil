@@ -39,4 +39,4 @@ pub use crate::job::*;
 pub use crate::error::*;
 pub use crate::db::migrate;
 pub use coil_proc_macro::*;
-pub use crate::runner::Builder as RunnerBuilder;
+pub use crate::runner::{Runner, Builder as RunnerBuilder};

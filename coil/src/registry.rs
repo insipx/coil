@@ -59,7 +59,7 @@ impl<Env: 'static> Registry<Env> {
             .collect();
 
         Self {
-            jobs: jobs,
+            jobs,
             _marker: PhantomData,
         }
     }

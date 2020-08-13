@@ -21,6 +21,7 @@ use crate::job::Job;
 use futures::{StreamExt, future::FutureExt};
 use crate::{db, error::*, registry::Registry};
 
+/// Builder pattern struct for the Runner
 pub struct Builder<Env> {
     environment: Env,
     num_threads: Option<usize>,
@@ -101,9 +102,9 @@ impl<Env: 'static> Builder<Env> {
     }
 }
 
-/// Runner for background tasks
-/// Syncronous tasks are ran in a threadpool
-/// Asyncronous tasks are spawned on the executor
+/// Runner for background tasks.
+/// Synchronous tasks are run in a threadpool.
+/// Asynchronous tasks are spawned on the executor.
 pub struct Runner<Env> {
     pool: rayon::ThreadPool, 
     executor: Arc<dyn Spawn>,
@@ -126,7 +127,8 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
     pub fn build(env: Env, executor: impl Spawn + 'static, conn: sqlx::PgPool) -> Builder<Env> {
         Builder::new(env, executor, conn)
     }
-    
+
+    /// Runs all the pending tasks in a loop
     pub async fn run_all_pending_tasks(&self) -> Result<(), Error> {
         let (tx, mut rx) = flume::bounded(self.max_tasks);
 
@@ -182,7 +184,8 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
 
         let perform_fn = registry.get(&job.job_type)
             .ok_or_else(|| PerformError::from(format!("Unknown Job Type {}", job.job_type)))?;
-        // need to unwind this 
+
+        // need to unwind this
         if perform_fn.is_async() {
             self.executor.spawn(async move {
                 println!("Spawned");

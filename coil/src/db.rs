@@ -29,7 +29,18 @@ pub struct BackgroundJob {
     pub data: Vec<u8>,
 }
 
-/// Run the migrations for the background Tasks
+/// Run the migrations for the background tasks.
+/// This creates a table _background_tasks which stores the tasks for execution
+/// ```sql
+/// CREATE TABLE _background_tasks (
+///  id BIGSERIAL PRIMARY KEY NOT NULL,
+///  job_type TEXT NOT NULL,
+///  data BYTEA NOT NULL,
+///  retries INTEGER NOT NULL DEFAULT 0,
+///  last_retry TIMESTAMP NOT NULL DEFAULT '1970-01-01',
+///  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+/// );
+/// ```
 pub async fn migrate(pool: impl Acquire<'_, Database=Postgres>) -> Result<(), Error> {
     sqlx::migrate!("src/migrations/").run(pool).await.map_err(Into::into)
 }
@@ -62,13 +73,4 @@ pub async fn update_failed_job(conn: impl Executor<'_, Database=Postgres>, id: i
         .await?;
     Ok(())
 }
-
-pub async fn get_max_tasks(conn: impl Executor<'_, Database=Postgres>) -> Result<Option<i64>, EnqueueError> {
-    sqlx::query_as::<_, (i64, )>("SELECT COUNT(*) FROM _background_tasks")
-        .fetch_optional(conn)
-        .await
-        .map(|v| v.map(|v| v.0))
-        .map_err(Into::into)
-}
-
 

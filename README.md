@@ -56,7 +56,8 @@ runner.run_all_pending_tasks().await.unwrap()
 
 ### Differences from [`swirl`](https://github.com/sgrif/swirl)
 - Supports asyncronous jobs/executors
+- Supports Jobs with Generic Arguments
 - Serializes data into Postgres with Messagepack instead of Json. 
-- In asyncronous jobs, database queries will be run asynchronously with SQLx
-- Migrations are included in the binary and exposed via a `migrate` fn. Results in less boilerplate setting up the database.
+- In asynchronous jobs, database queries will be run asynchronously with SQLx
+- Migrations are included in the binary and exposed via a `migrate` fn. 
 - Enqueue is an `async fn`
