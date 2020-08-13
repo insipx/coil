@@ -21,6 +21,7 @@ flume = "0.7.2"
 timer = { version = "3.0", package = "futures-timer" }
 once_cell = "1.4.0"
 linkme = "0.2.2"
+log = "0.4.11"
 
 [features]
 nightly = []

@@ -41,8 +41,7 @@ async fn resize_image_with_env<E: Serialize + DeserializeOwned + 'static + Send>
 */
 
 #[coil::background_job]
-async fn resize_image(name: String) -> Result<(), coil::PerformError> {
-    // println!("File Name: {}, height: {}, width: {}", file_name, dimensions.height, dimensions.width);
+fn resize_image(name: String) -> Result<(), coil::PerformError> {
     println!("{}", name);
     Ok(())
 }
@@ -90,9 +89,11 @@ fn enqueue_5_jobs() {
 #[test]
 fn enqueue_5_jobs_limited_size() {
     let pool = smol::block_on(sqlx::PgPool::connect("postgres://archive:default@localhost:5432/test_job_queue")).unwrap();
+    /*
     let env = Environment {
         conn: pool.clone()
     };
+    */
     smol::run(async move {
         resize_image("tohru".to_string()).enqueue(&pool).await.unwrap();
         resize_image("gambit".to_string()).enqueue(&pool).await.unwrap();
@@ -100,7 +101,7 @@ fn enqueue_5_jobs_limited_size() {
         resize_image("kaguya".to_string()).enqueue(&pool).await.unwrap();
         resize_image("L".to_string()).enqueue(&pool).await.unwrap();
 
-        let runner = coil::RunnerBuilder::new(env, Executor, pool)
+        let runner = coil::RunnerBuilder::new((), Executor, pool)
             .num_threads(8)
             .register_job::<resize_image::Job>()
             .build()

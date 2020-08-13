@@ -52,7 +52,12 @@ impl<Env: 'static> Registry<Env> {
 
     pub fn register_job<T: Job + 'static + Send>(&mut self) {
         println!("Registering job {}", T::JOB_TYPE);
-        self.jobs.insert(T::JOB_TYPE, JobVTable::from_job::<T>());
+        println!("{:?} : {:?}", TypeId::of::<T::Environment>(), TypeId::of::<Env>());
+        if  TypeId::of::<T::Environment>() == TypeId::of::<Env>() {
+            self.jobs.insert(T::JOB_TYPE, JobVTable::from_job::<T>());
+        } else {
+            log::warn!("could not register job");
+        }
         println!("Registered");
     }
 
