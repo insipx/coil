@@ -17,15 +17,18 @@
 use sqlx::PgPool;
 use futures::task::{Spawn, SpawnExt};
 use std::sync::Arc;
+use crate::job::Job;
 use futures::{StreamExt, future::FutureExt};
 use crate::{db, error::*, registry::Registry};
 
+/// Builder pattern struct for the Runner
 pub struct Builder<Env> {
     environment: Env,
     num_threads: Option<usize>,
     conn: sqlx::PgPool,
     executor: Arc<dyn Spawn>,
     max_tasks: Option<usize>,
+    registry: Registry<Env>,
 }
 
 impl<Env: 'static> Builder<Env> {
@@ -36,7 +39,33 @@ impl<Env: 'static> Builder<Env> {
             executor: Arc::new(executor),
             max_tasks: None,
             num_threads: None,
+            registry: Registry::load(),
         }
+    }
+    
+    ///  Register a job that hasn't or can't be registered by invoking the `register_job!` macro
+    ///
+    /// Jobs that include generics must use this function in order to be registered with a runner.
+    /// Jobs must be registered with every generic that is used.
+    /// Jobs are available in the format `my_function_name::Job`.
+    ///
+    ///  # Example
+    ///  ```
+    ///  RunnerBuilder::new(env, executor, conn)
+    ///      .register_job::<resize_image::Job<String>>()
+    ///  ```
+    ///  Register a job for every generic (if they differ):
+    ///
+    ///  ```
+    ///  RunnerBuilder::new(env, executor, conn)
+    ///     .register_job::<resize_image::Job<String>>()
+    ///     .register_job::<resize_image::Job<u32>>()
+    ///     .register_job::<resize_image::Job<MyStruct>()
+    ///  ```
+    ///
+    pub fn register_job<T: Job + 'static + Send>(mut self) -> Self {
+        self.registry.register_job::<T>();
+        self
     }
 
     pub fn num_threads(mut self, threads: usize) -> Self {
@@ -66,15 +95,16 @@ impl<Env: 'static> Builder<Env> {
             executor: self.executor,
             conn: self.conn,
             environment: Arc::new(self.environment),
-            registry: Arc::new(Registry::load()),
+            registry: Arc::new(self.registry),
+            // registry: Arc::new(Registry::load()),
             max_tasks 
         })
     }
 }
 
-/// Runner for background tasks
-/// Syncronous tasks are ran in a threadpool
-/// Asyncronous tasks are spawned on the executor
+/// Runner for background tasks.
+/// Synchronous tasks are run in a threadpool.
+/// Asynchronous tasks are spawned on the executor.
 pub struct Runner<Env> {
     pool: rayon::ThreadPool, 
     executor: Arc<dyn Spawn>,
@@ -92,7 +122,13 @@ enum Event {
 }
 
 impl<Env: Send + Sync + 'static> Runner<Env> {
+    
+    /// Build the builder for `Runner`
+    pub fn build(env: Env, executor: impl Spawn + 'static, conn: sqlx::PgPool) -> Builder<Env> {
+        Builder::new(env, executor, conn)
+    }
 
+    /// Runs all the pending tasks in a loop
     pub async fn run_all_pending_tasks(&self) -> Result<(), Error> {
         let (tx, mut rx) = flume::bounded(self.max_tasks);
 
@@ -119,7 +155,7 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
                         Some(Event::Working) => pending_messages -=1,
                         Some(Event::NoJobAvailable) => return Ok(()),
                         None => return Err(CommError::NoMessage.into()),
-                        _ => unimplemented!()
+                        _ => todo!()
                     }
                 },
                 _ = timeout.fuse() => return Err(CommError::NoMessage.into())
@@ -148,14 +184,18 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
 
         let perform_fn = registry.get(&job.job_type)
             .ok_or_else(|| PerformError::from(format!("Unknown Job Type {}", job.job_type)))?;
-    
-        // need to unwind this 
+
+        // need to unwind this
         if perform_fn.is_async() {
             self.executor.spawn(async move {
+                println!("Spawned");
                 let res = perform_fn.perform_async(job.data, env, &mut transaction).await;
                 match  res {
                     Ok(_) => db::delete_succesful_job(&mut transaction, job.id).await.unwrap(),
-                    Err(_) => db::update_failed_job(&mut transaction, job.id).await.unwrap(),
+                    Err(e) => {
+                        println!("{:?}", e);
+                        db::update_failed_job(&mut transaction, job.id).await.unwrap()
+                    },
                 }
                 transaction.commit().await.unwrap();
             })?;

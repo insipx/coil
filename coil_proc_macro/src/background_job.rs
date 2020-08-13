@@ -24,51 +24,94 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
     let arg_names_1 = job.args.names();
     let return_type = job.return_type;
     let body = connection_arg.wrap(job.body);
-    let is_async = job.is_async;    
+    let (impl_generics, ty_generics, where_clause) = job.generics.split_for_impl();
+    let is_async = job.is_async;
 
-    let res = quote! {
-        #(#attrs)*
-        #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
-            #name :: Job {
-                #(#struct_assign),*
+    let res = if job.generics_exist {
+        quote! {
+            #(#attrs)*
+            #vis #fn_token #name #impl_generics (#(#fn_args),*) -> #name :: Job #ty_generics #where_clause {
+                #name :: Job {
+                    #(#struct_assign),*
+                }
+            }
+
+            #[coil::async_trait::async_trait]
+            impl #impl_generics coil::Job for #name :: Job #ty_generics #where_clause {
+                type Environment = #env_type;
+                const JOB_TYPE: &'static str = stringify!(#name);
+                const ASYNC: bool = #is_async;
+
+                async #fn_token perform_async(self,
+                    #env_pat: std::sync::Arc<Self::Environment>,
+                    conn: &mut sqlx::Transaction<'static,
+                    coil::sqlx::Postgres>
+                ) #return_type
+                {
+                    let Self { #(#arg_names_0),* } = self;
+                    #body
+                }
+
+                #fn_token perform(self, #env_pat: &Self::Environment, conn: &mut sqlx::Transaction<'static, coil::sqlx::Postgres>) #return_type {
+                    let Self { #(#arg_names_1),* } = self;
+                    #body
+                }
+            }
+
+            mod #name {
+                use super::*;
+
+                #[derive(coil::Serialize, coil::Deserialize)]
+                #[serde(crate = "coil::serde")]
+                pub struct Job #ty_generics #where_clause {
+                    #(#struct_def),*
+                }
             }
         }
-
-        #[coil::async_trait::async_trait] 
-        impl coil::Job for #name :: Job {
-            type Environment = #env_type;
-            const JOB_TYPE: &'static str = stringify!(#name);
-            const ASYNC: bool = #is_async;
-
-            async #fn_token perform_async(self, 
-                #env_pat: std::sync::Arc<Self::Environment>, 
-                conn: &mut sqlx::Transaction<'static, 
-                coil::sqlx::Postgres>
-            ) #return_type 
-            {
-                let Self { #(#arg_names_0),* } = self;
-                #body
+    } else {
+        quote! {
+            #(#attrs)*
+            #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
+                #name :: Job {
+                    #(#struct_assign),*
+                }
             }
 
-            #fn_token perform(self, #env_pat: &Self::Environment, conn: &mut sqlx::Transaction<'static, coil::sqlx::Postgres>) #return_type {
-                let Self { #(#arg_names_1),* } = self;
-                #body
+            #[coil::async_trait::async_trait]
+            impl coil::Job for #name :: Job {
+                type Environment = #env_type;
+                const JOB_TYPE: &'static str = stringify!(#name);
+                const ASYNC: bool = #is_async;
+
+                async #fn_token perform_async(self,
+                    #env_pat: std::sync::Arc<Self::Environment>,
+                    conn: &mut sqlx::Transaction<'static,
+                    coil::sqlx::Postgres>
+                ) #return_type
+                {
+                    let Self { #(#arg_names_0),* } = self;
+                    #body
+                }
+
+                #fn_token perform(self, #env_pat: &Self::Environment, conn: &mut sqlx::Transaction<'static, coil::sqlx::Postgres>) #return_type {
+                    let Self { #(#arg_names_1),* } = self;
+                    #body
+                }
             }
-        }
 
-        mod #name {
-            use super::*;
+            mod #name {
+                use super::*;
 
-            #[derive(coil::Serialize, coil::Deserialize)]
-            #[serde(crate = "coil::serde")]
-            pub struct Job {
-                #(#struct_def),*
+                #[derive(coil::Serialize, coil::Deserialize)]
+                #[serde(crate = "coil::serde")]
+                pub struct Job {
+                    #(#struct_def),*
+                }
+
+                coil::register_job!(Job);
             }
-
-            coil::register_job!(Job);
         }
     };
-
     Ok(res)
 }
 
@@ -81,6 +124,8 @@ struct BackgroundJob {
     args: JobArgs,
     return_type: syn::ReturnType,
     body: Vec<syn::Stmt>,
+    generics: syn::Generics,
+    generics_exist: bool,
 }
 
 impl BackgroundJob {
@@ -92,6 +137,7 @@ impl BackgroundJob {
             block,
         } = item;
 
+        let mut generics_exist = false;
         let mut is_async = false;
         if let Some(constness) = sig.constness {
             return Err(constness
@@ -116,10 +162,7 @@ impl BackgroundJob {
         }
 
         if !sig.generics.params.is_empty() {
-            return Err(sig
-                .generics
-                .span()
-                .error("#[coil::background_job] cannot be used on generic functions"));
+            generics_exist = true;
         }
 
         if let Some(where_clause) = sig.generics.where_clause {
@@ -131,8 +174,9 @@ impl BackgroundJob {
         let fn_token = sig.fn_token;
         let return_type = sig.output.clone();
         let ident = sig.ident.clone();
+        let generics = sig.generics.clone();
         let job_args = JobArgs::try_from(sig)?;
-        
+
         Ok(Self {
             attrs,
             visibility: vis,
@@ -142,6 +186,8 @@ impl BackgroundJob {
             return_type,
             body: block.stmts,
             is_async,
+            generics,
+            generics_exist
         })
     }
 }
@@ -197,7 +243,7 @@ impl JobArgs {
                 (_, _, Arg::Connection(_)) => {
                     return Err(
                         span.error("Multiple database connection arguments")
-                            .help("Put a connection pool in the environment instead of accepting it as an argument")
+                            .help("To take a connection pool as an argument instead of a single connection, use the type `&dyn coil::db::DieselPoolObj`")
                     );
                 }
                 (_, _, Arg::Normal(pat_type)) => args.push(pat_type),

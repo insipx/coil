@@ -23,7 +23,6 @@ use crate::error::PerformError;
 use crate::job::Job;
 use std::pin::Pin;
 use std::sync::Arc;
-use sqlx::prelude::*;
 use sqlx::Postgres;
 
 type Conn = sqlx::Transaction<'static, Postgres>;
@@ -38,6 +37,18 @@ pub struct Registry<Env> {
 }
 
 impl<Env: 'static> Registry<Env> {
+    
+    pub fn register_job<T: Job + 'static + Send>(&mut self) {
+        println!("Registering job {}", T::JOB_TYPE);
+        println!("{:?} : {:?}", TypeId::of::<T::Environment>(), TypeId::of::<Env>());
+        if  TypeId::of::<T::Environment>() == TypeId::of::<Env>() {
+            self.jobs.insert(T::JOB_TYPE, JobVTable::from_job::<T>());
+        } else {
+            log::warn!("could not register job");
+        }
+        println!("Registered");
+    }
+
     /// Loads the registry from all invocations of [`register_job!`] for this
     /// environment type
     pub fn load() -> Self {
@@ -48,7 +59,7 @@ impl<Env: 'static> Registry<Env> {
             .collect();
 
         Self {
-            jobs: jobs,
+            jobs,
             _marker: PhantomData,
         }
     }
@@ -105,6 +116,7 @@ impl JobVTable {
                 fun: perform_sync_job::<T>,
             }
         };
+        println!("Type Id: {:?}", TypeId::of::<T::Environment>());
         Self {
             env_type: TypeId::of::<T::Environment>(),
             job_type: T::JOB_TYPE,

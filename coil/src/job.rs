@@ -26,14 +26,14 @@ pub trait Job: Serialize + DeserializeOwned {
     type Environment: 'static + Send + Sync;
     const JOB_TYPE: &'static str;
     #[doc(hidden)] 
-    const ASYNC: bool;    
+    const ASYNC: bool;
 
     /// inserts the job into the Postgres Database
     async fn enqueue(self, pool: &PgPool) -> Result<(), EnqueueError> {
         crate::db::enqueue_job(pool, self).await
     }
     
-    /// Logic for actually running a synchronous job
+    /// Logic for running a synchronous job
     #[doc(hidden)] 
     fn perform(self, _: &Self::Environment, _: &mut Conn) -> Result<(), PerformError> 
     {
