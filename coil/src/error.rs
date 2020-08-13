@@ -55,6 +55,8 @@ pub enum PerformError {
     Decode(#[from] rmp_serde::decode::Error),
     #[error("Trying to perform a async job in a sync context or vice-versa")]
     WrongJob,
+    #[error("Unknown Job Type {0}")]
+    UnknownJob(String),
     #[error("{0}")]
     General(String),
 }

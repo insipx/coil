@@ -20,6 +20,7 @@ use std::sync::Arc;
 use crate::job::Job;
 use futures::{StreamExt, future::FutureExt};
 use crate::{db, error::*, registry::Registry};
+use sqlx::{Postgres, Executor};
 
 /// Builder pattern struct for the Runner
 pub struct Builder<Env> {
@@ -50,14 +51,14 @@ impl<Env: 'static> Builder<Env> {
     /// Jobs are available in the format `my_function_name::Job`.
     ///
     ///  # Example
-    ///  ```
+    ///  ```ignore
     ///  RunnerBuilder::new(env, executor, conn)
     ///      .register_job::<resize_image::Job<String>>()
     ///  ```
     ///  Register a job for every generic (if they differ):
     ///
-    ///  ```
-    ///  RunnerBuilder::new(env, executor, conn)
+    ///  ```ignore
+    ///  RunnerBuilder::new((), executor, conn)
     ///     .register_job::<resize_image::Job<String>>()
     ///     .register_job::<resize_image::Job<u32>>()
     ///     .register_job::<resize_image::Job<MyStruct>()
@@ -128,6 +129,11 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
         Builder::new(env, executor, conn)
     }
 
+    pub async fn connection(&self) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, Error> {
+        let conn = self.conn.acquire().await?;
+        Ok(conn)
+    }
+
     /// Runs all the pending tasks in a loop
     pub async fn run_all_pending_tasks(&self) -> Result<(), Error> {
         let (tx, mut rx) = flume::bounded(self.max_tasks);
@@ -163,27 +169,21 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
         }
     }
     
-    async fn run_single_job(&self, tx: flume::Sender<Event>) -> Result<(), Error> {
+    async fn run_single_job(&self, tx: flume::Sender<Event>, ) -> Result<(), Error> {
+        let mut transaction = self.conn.begin().await?;
+        let job = Self::get_single_job(tx, &mut transaction).await?;
+        
+        let job = if job.is_none() {
+            return Ok(());
+        } else {
+            job.expect("Checked for none; qed")
+        };
+        
         let env = Arc::clone(&self.environment);
         let registry = Arc::clone(&self.registry);
-        let mut transaction = self.conn.begin().await?;
-        let job = match db::find_next_unlocked_job(&mut transaction).await {
-            Ok(Some(j)) => { 
-                let _ = tx.send_async(Event::Working).await;
-                j 
-            },
-            Ok(None) => {
-                let _ = tx.send_async(Event::NoJobAvailable).await;
-                return Ok(());
-            },
-            Err(e) =>  {
-                let _ = tx.send_async(Event::ErrorLoadingJob(e.into())).await;
-                return Ok(());
-            }
-        };
 
         let perform_fn = registry.get(&job.job_type)
-            .ok_or_else(|| PerformError::from(format!("Unknown Job Type {}", job.job_type)))?;
+            .ok_or_else(|| PerformError::UnknownJob(job.job_type.to_string()))?;
 
         // need to unwind this
         if perform_fn.is_async() {
@@ -210,6 +210,131 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
         }
         Ok(())
     }
+
+    async fn get_single_job(tx: flume::Sender<Event>, conn: impl Executor<'_, Database=Postgres>) -> Result<Option<db::BackgroundJob>, Error> {
+        let job = match db::find_next_unlocked_job(conn).await {
+            Ok(Some(j)) => { 
+                let _ = tx.send_async(Event::Working).await;
+                j 
+            },
+            Ok(None) => {
+                let _ = tx.send_async(Event::NoJobAvailable).await;
+                return Ok(None);
+            },
+            Err(e) =>  {
+                let _ = tx.send_async(Event::ErrorLoadingJob(e.into())).await;
+                return Ok(None);
+            }
+        };
+        Ok(Some(job))
+    }
 }
 
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Barrier, Mutex, MutexGuard};
+    use once_cell::sync::Lazy;
+    use sqlx::prelude::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe, PanicInfo, RefUnwindSafe, UnwindSafe};
+
+
+    static TEST_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| {
+        Mutex::new(())
+    });
+
+    struct TestGuard<'a>(MutexGuard<'a, ()>);
+    impl<'a> TestGuard<'a> {
+        fn lock() -> Self {
+            TestGuard(TEST_MUTEX.lock().unwrap())
+
+        }
+    }
+
+    impl<'a> Drop for TestGuard<'a> {
+        fn drop(&mut self) {
+            smol::block_on(async move {
+                sqlx::query!("TRUNCATE TABLE _background_tasks")
+                    .execute(&mut runner().connection().await.unwrap())
+                    .await
+                    .unwrap()
+            });
+        }
+    }
+
+    struct Executor;
+    impl futures::task::Spawn for Executor {
+        fn spawn_obj(&self, future: futures::task::FutureObj<'static, ()>) -> Result<(), futures::task::SpawnError> {
+            smol::Task::spawn(future).detach();
+            Ok(())
+        }
+    }
+
+    fn runner() -> Runner<()> {
+        let database_url = dotenv::var("DATABASE_URL").expect("DATABASE_URL must be set to run tests");
+        let pool = smol::block_on(sqlx::PgPool::connect(database_url.as_str())).unwrap();
+        crate::Runner::build((), Executor, pool)
+            .num_threads(2)
+            .max_tasks(2)
+            .build()
+            .unwrap()
+    }
+
+    fn create_dummy_job(runner: &Runner<()>) -> i64 {
+        let data = rmp_serde::to_vec(vec![0].as_slice()).unwrap();
+        smol::block_on(async move {
+            let mut conn = runner.connection().await.unwrap();
+            let rec = sqlx::query!("INSERT INTO _background_tasks (job_type, data) VALUES ($1, $2) RETURNING (id, job_type, data)", "Foo", data)
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+            sqlx::query_as::<_, (i64,)>("SELECT currval(pg_get_serial_sequence('_background_tasks', 'id'))")
+                .fetch_one(&mut conn)
+                .await
+                .unwrap()
+                .0
+        })
+    }
+
+    #[test]
+    fn jobs_are_locked_when_fetched() {
+        let _guard = TestGuard::lock();
+        let runner = runner();
+        let first_job_id = create_dummy_job(&runner);
+        let second_job_id = create_dummy_job(&runner);
+        let fetch_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
+        let fetch_barrier2 = fetch_barrier.clone();
+        let return_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
+        let return_barrier2 = return_barrier.clone();
+    
+        let pool = runner.conn.clone();
+
+        let (tx, _) = flume::bounded(10);
+        let tx0 = tx.clone();
+        let pool0 = pool.clone();
+        let handle0 = smol::block_on(async move {
+            let mut transaction = pool0.begin().await.unwrap();
+            std::thread::spawn(move ||{
+                let job = smol::block_on(Runner::<()>::get_single_job(tx0, &mut transaction)).unwrap().unwrap();
+                fetch_barrier.0.wait();
+                assert_eq!(first_job_id, job.id);
+                return_barrier.0.wait();
+            })
+        });
+        
+        fetch_barrier2.0.wait();
+        let tx1 = tx.clone();
+        let handle1 = smol::block_on(async move {
+            let mut transaction = pool.begin().await.unwrap();
+            std::thread::spawn(move || {
+                let job = smol::block_on(Runner::<()>::get_single_job(tx1, &mut transaction)).unwrap().unwrap();
+                assert_eq!(second_job_id, job.id);
+                return_barrier2.0.wait();
+            })
+        });
+
+        handle0.join();
+        handle1.join();
+    }
+}

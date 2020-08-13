@@ -71,6 +71,10 @@ impl<Env: 'static> Registry<Env> {
             _marker: PhantomData,
         })
     }
+
+    pub fn is_async(&self, job_type: &str) -> Option<bool> {
+        self.jobs.get(job_type).map(|j| j.is_async())
+    }
 }
 
 /// Register a job to be run by coil. This must be called for any
@@ -121,6 +125,13 @@ impl JobVTable {
             env_type: TypeId::of::<T::Environment>(),
             job_type: T::JOB_TYPE,
             perform,
+        }
+    }
+
+    pub fn is_async(&self) -> bool {
+        match self.perform {
+            SyncOrAsync::Sync {..} => false,
+            SyncOrAsync::Async { .. } => true,
         }
     }
 }
