@@ -102,7 +102,12 @@ enum Event {
 }
 
 impl<Env: Send + Sync + 'static> Runner<Env> {
-
+    
+    /// Build the builder for `Runner`
+    pub fn build(env: Env, executor: impl Spawn + 'static, conn: sqlx::PgPool) -> Builder<Env> {
+        Builder::new(env, executor, conn)
+    }
+    
     pub async fn run_all_pending_tasks(&self) -> Result<(), Error> {
         let (tx, mut rx) = flume::bounded(self.max_tasks);
 
