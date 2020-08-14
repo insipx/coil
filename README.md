@@ -8,6 +8,7 @@ Coil is built first for use in [`substrate-archive`](https://github.com/parityte
 Supports synchronous and asynchronous jobs. Synchronous jobs will be spawned into a threadpool managed by [`rayon`](https://github.com/rayon-rs/rayon). Async jobs will be spawned onto an executor. The only requirement is that the executor implements the futures `Spawn` trait. This way, `coil` supports `Tokio`, `smol`, and `async-std`.
 
 <sub><sup>† This software is alpha, and not intended for production use yet
+
 <sub><sup>†† Portions of this software are licensed as MIT. See the [License](#license) section
 
 ---
