@@ -27,17 +27,17 @@ use channel::Sender;
 use std::any::Any;
 
 /// Builder pattern struct for the Runner
-pub struct Builder<Env, F> {
+pub struct Builder<Env> {
     environment: Env,
     num_threads: Option<usize>,
     conn: sqlx::PgPool,
     executor: Arc<dyn Spawn>,
     max_tasks: Option<usize>,
     registry: Registry<Env>,
-    on_finish: Option<F>,
+    on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
 }
 
-impl<Env: 'static, F: 'static> Builder<Env, F> where F: Fn(i64) + Send + Copy + Sync {
+impl<Env: 'static> Builder<Env> {
     pub fn new(env: Env, executor: impl Spawn + 'static, conn: sqlx::PgPool) -> Self {
         Self {
             environment: env,
@@ -86,12 +86,12 @@ impl<Env: 'static, F: 'static> Builder<Env, F> where F: Fn(i64) + Send + Copy + 
     }
     
     /// Provide a hook that runs after a job has finished and all destructors have run
-    pub fn on_finish(mut self, on_finish: F) -> Self {
-        self.on_finish = Some(on_finish);
+    pub fn on_finish(mut self, on_finish: impl Fn(i64) + Send + Sync + 'static) -> Self {
+        self.on_finish = Some(Arc::new(on_finish));
         self
     }
 
-    pub fn build(self) -> Result<Runner<Env, F>, Error> {
+    pub fn build(self) -> Result<Runner<Env>, Error> {
         let pool = if let Some(t) = self.num_threads {
             rayon::ThreadPoolBuilder::new().num_threads(t).thread_name(|i| format!("bg-{}", i))
         } else {
@@ -121,15 +121,15 @@ impl<Env: 'static, F: 'static> Builder<Env, F> where F: Fn(i64) + Send + Copy + 
 /// Runner for background tasks.
 /// Synchronous tasks are run in a threadpool.
 /// Asynchronous tasks are spawned on the executor.
-pub struct Runner<Env, Fun> {
+pub struct Runner<Env> {
     pool: rayon::ThreadPool, 
     executor: Arc<dyn Spawn>,
     conn: PgPool,
     environment: Arc<Env>,
     registry: Arc<Registry<Env>>,
-    on_finish: Option<Fun>,
     /// maximum number of tasks to run at any one time
-    max_tasks: usize 
+    max_tasks: usize,
+    on_finish: Option<Arc<Fn(i64) + Send + Sync + 'static>>
 }
 
 enum Event {
@@ -144,10 +144,10 @@ enum Event {
     Dummy
 }
 
-impl<Env: Send + Sync + RefUnwindSafe + 'static, Fun: 'static> Runner<Env, Fun> where Fun: Fn(i64) + Send + Copy + Sync {
+impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     
     /// Build the builder for `Runner`
-    pub fn build(env: Env, executor: impl Spawn + 'static, conn: sqlx::PgPool) -> Builder<Env, Fun> {
+    pub fn build(env: Env, executor: impl Spawn + 'static, conn: sqlx::PgPool) -> Builder<Env> {
         Builder::new(env, executor, conn)
     }
 
@@ -240,7 +240,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static, Fun: 'static> Runner<Env, Fun> 
         F: FnOnce(db::BackgroundJob) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>> + Send + 'static
     {
         let conn = self.conn.clone();
-        let finish_hook = self.on_finish;
+        let finish_hook = self.on_finish.clone();
         self.executor.spawn(async move {
             let run = || -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>> {
                 async move {
@@ -285,7 +285,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static, Fun: 'static> Runner<Env, Fun> 
         F: FnOnce(db::BackgroundJob) -> Result<(), PerformError> + Send + UnwindSafe + 'static
     {
         let conn = self.conn.clone();
-        let finish_hook = self.on_finish;
+        let finish_hook = self.on_finish.clone();
         self.pool.spawn_fifo(move || {
             let res = move || -> Result<(), PerformError> {
                 let mut transaction = match block_on(conn.begin()) {
@@ -322,7 +322,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static, Fun: 'static> Runner<Env, Fun> 
         });
     }
     
-    async fn finish_work(res: Result<(), PerformError>, mut trx: sqlx::Transaction<'static, Postgres>, job_id: i64, on_finish: Option<Fun>) {
+    async fn finish_work(res: Result<(), PerformError>, mut trx: sqlx::Transaction<'static, Postgres>, job_id: i64, on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>) {
         match res {
             Ok(_) => {
                 db::delete_successful_job(&mut trx, job_id).await.map_err(|e| {
@@ -514,16 +514,17 @@ mod tests {
         
         let(tx, rx) = channel::bounded(10);
 
-        let runner = runner();
+        let mut runner = runner();
+        let tx0 = tx.clone();
+        runner.on_finish = Some(Arc::new(move |job_id| {
+            smol::block_on(tx0.send(Event::Dummy));
+        }));
         let mut conn = smol::block_on(runner.connection()).unwrap();
 
         create_dummy_job(&runner, false);
         
         let tx0 = tx.clone();
-        runner.get_single_sync_job(tx.clone(), move |_| {
-            smol::block_on(tx0.send(Event::Dummy));
-            Ok(())
-        });
+        runner.get_single_sync_job(tx.clone(), move |_| Ok(()));
         smol::block_on(runner.wait_for_all_tasks(rx, 1));
          
         let remaining_jobs = smol::block_on(get_job_count(&mut conn));
