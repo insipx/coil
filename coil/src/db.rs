@@ -74,17 +74,16 @@ pub async fn find_next_unlocked_job(conn: impl Executor<'_, Database=Postgres>, 
     }
 }
 
-pub async fn delete_succesful_job(conn: impl Executor<'_, Database=Postgres>, id: i64) -> Result<(), EnqueueError> {
+pub async fn delete_successful_job(conn: impl Executor<'_, Database=Postgres>, id: i64) -> Result<(), EnqueueError> {
     sqlx::query!("DELETE FROM _background_tasks WHERE id=$1", id)
         .execute(conn)
         .await?;
     Ok(())
 }
 
-pub async fn update_failed_job(conn: impl Executor<'_, Database=Postgres>, id: i64) -> Result<(), EnqueueError> {
-    sqlx::query!("UPDATE _background_tasks SET retries = retries + 1, last_retry = NOW() WHERE id = $1", id)
+pub async fn update_failed_job(conn: impl Executor<'_, Database=Postgres>, id: i64) {
+    let _ = sqlx::query!("UPDATE _background_tasks SET retries = retries + 1, last_retry = NOW() WHERE id = $1", id)
         .execute(conn)
-        .await?;
-    Ok(())
+        .await;
 }
 

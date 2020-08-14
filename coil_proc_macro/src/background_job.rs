@@ -15,7 +15,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
     let env_pat = &job.args.env_arg.pat;
     let env_type = &job.args.env_arg.ty;
     let connection_arg = &job.args.connection_arg;
-    // let pool_pat = connection_arg.pool_pat();
+    let pool_pat = connection_arg.pool_pat();
     // let pool_ty = connection_arg.pool_ty();
     let fn_args = job.args.iter();
     let struct_def = job.args.struct_def();
@@ -44,15 +44,14 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
 
                 async #fn_token perform_async(self,
                     #env_pat: std::sync::Arc<Self::Environment>,
-                    conn: &mut sqlx::Transaction<'static,
-                    coil::sqlx::Postgres>
-                ) #return_type
+                    #pool_pat: &mut sqlx::PgConnection
+                    ) #return_type
                 {
                     let Self { #(#arg_names_0),* } = self;
                     #body
                 }
 
-                #fn_token perform(self, #env_pat: &Self::Environment, conn: &mut sqlx::Transaction<'static, coil::sqlx::Postgres>) #return_type {
+                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &mut sqlx::PgConnection) #return_type {
                     let Self { #(#arg_names_1),* } = self;
                     #body
                 }
@@ -85,15 +84,14 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
 
                 async #fn_token perform_async(self,
                     #env_pat: std::sync::Arc<Self::Environment>,
-                    conn: &mut sqlx::Transaction<'static,
-                    coil::sqlx::Postgres>
-                ) #return_type
+                    #pool_pat: &mut sqlx::PgConnection
+                    ) #return_type
                 {
                     let Self { #(#arg_names_0),* } = self;
                     #body
                 }
 
-                #fn_token perform(self, #env_pat: &Self::Environment, conn: &mut sqlx::Transaction<'static, coil::sqlx::Postgres>) #return_type {
+                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &mut sqlx::PgConnection) #return_type {
                     let Self { #(#arg_names_1),* } = self;
                     #body
                 }
