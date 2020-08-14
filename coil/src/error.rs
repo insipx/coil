@@ -57,6 +57,8 @@ pub enum PerformError {
     WrongJob,
     #[error("Unknown Job Type {0}")]
     UnknownJob(String),
+    #[error("Future failed to spawn on executor {0}")]
+    FuturesSpawn(#[from] futures::task::SpawnError),
     #[error("{0}")]
     General(String),
 }

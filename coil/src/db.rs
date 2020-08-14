@@ -28,6 +28,7 @@ pub struct BackgroundJob {
     pub id: i64,
     pub job_type: String,
     pub data: Vec<u8>,
+    pub is_async: bool,
 }
 
 /// Run the migrations for the background tasks.
@@ -37,6 +38,7 @@ pub struct BackgroundJob {
 ///  id BIGSERIAL PRIMARY KEY NOT NULL,
 ///  job_type TEXT NOT NULL,
 ///  data BYTEA NOT NULL,
+///  is_async BOOLEAN NOT NULL,
 ///  retries INTEGER NOT NULL DEFAULT 0,
 ///  last_retry TIMESTAMP NOT NULL DEFAULT '1970-01-01',
 ///  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -48,17 +50,28 @@ pub async fn migrate(pool: impl Acquire<'_, Database=Postgres>) -> Result<(), Er
 
 pub async fn enqueue_job<T: Job>(conn: impl Executor<'_, Database=Postgres>, job: T) -> Result<(), EnqueueError> {
     let data = rmp_serde::encode::to_vec(&job)?;
-    sqlx::query!("INSERT INTO _background_tasks (job_type, data) VALUES ($1, $2)", T::JOB_TYPE, data)
+    sqlx::query!("INSERT INTO _background_tasks (job_type, data, is_async) VALUES ($1, $2, $3)", T::JOB_TYPE, data, T::ASYNC)
         .execute(conn)
         .await?;
     Ok(())
 }
 
-pub async fn find_next_unlocked_job(conn: impl Executor<'_, Database=Postgres>) -> Result<Option<BackgroundJob>, EnqueueError> {
-    sqlx::query_as!(BackgroundJob, "SELECT id, job_type, data FROM _background_tasks ORDER BY id FOR UPDATE SKIP LOCKED")
-        .fetch_optional(conn)
-        .await
-        .map_err(Into::into)
+/// Get the next unlocked job. 
+/// Optionally pass a boolean to specify whether to get the next unlocked synchronous or
+/// asynchronous job. 
+/// Passing `None` gets the next unlocked job regardless of whether it is async or sync.
+pub async fn find_next_unlocked_job(conn: impl Executor<'_, Database=Postgres>, is_async: Option<bool>)  -> Result<Option<BackgroundJob>, EnqueueError> {
+    if let Some(a) = is_async {
+        match a {
+            true => sqlx::query_as!(BackgroundJob, "SELECT id, job_type, data, is_async FROM _background_tasks WHERE is_async = true ORDER BY id FOR UPDATE SKIP LOCKED").fetch_optional(conn).await.map_err(Into::into),
+            false => sqlx::query_as!(BackgroundJob, "SELECT id, job_type, data, is_async FROM _background_tasks WHERE is_async = true ORDER BY id FOR UPDATE SKIP LOCKED").fetch_optional(conn).await.map_err(Into::into),
+        }
+    } else {
+        sqlx::query_as!(BackgroundJob, "SELECT id, job_type, data, is_async FROM _background_tasks ORDER BY id FOR UPDATE SKIP LOCKED")
+            .fetch_optional(conn)
+            .await
+            .map_err(Into::into)
+    }
 }
 
 pub async fn delete_succesful_job(conn: impl Executor<'_, Database=Postgres>, id: i64) -> Result<(), EnqueueError> {

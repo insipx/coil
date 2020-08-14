@@ -17,10 +17,13 @@
 use sqlx::PgPool;
 use futures::task::{Spawn, SpawnExt};
 use std::sync::Arc;
+use std::panic::UnwindSafe;
 use crate::job::Job;
-use futures::{StreamExt, future::FutureExt};
+use futures::{Future, StreamExt, future::FutureExt, executor::block_on};
 use crate::{db, error::*, registry::Registry};
+use std::pin::Pin;
 use sqlx::{Postgres, Executor};
+use channel::{Sender, Receiver};
 
 /// Builder pattern struct for the Runner
 pub struct Builder<Env> {
@@ -136,7 +139,7 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
 
     /// Runs all the pending tasks in a loop
     pub async fn run_all_pending_tasks(&self) -> Result<(), Error> {
-        let (tx, mut rx) = flume::bounded(self.max_tasks);
+        let (tx, mut rx) = channel::bounded(self.max_tasks);
 
         let mut pending_messages = 0;
         
@@ -149,14 +152,17 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
             
             let mut futures = Vec::with_capacity(jobs_to_queue);
             for _ in 0..jobs_to_queue {
-                futures.push(self.run_single_job(tx.clone()))
+                // futures.push(self.run_single_job(tx.clone()))
+                futures.push(async move {
+                    println!("Hello");
+                });
             }
             futures::future::join_all(futures).await;
             
             pending_messages += jobs_to_queue;
             let timeout = timer::Delay::new(std::time::Duration::from_secs(5));
             futures::select! {
-                msg = rx.next() => {
+                msg = rx.next().fuse() => {
                     match msg {
                         Some(Event::Working) => pending_messages -=1,
                         Some(Event::NoJobAvailable) => return Ok(()),
@@ -168,10 +174,24 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
             };
         }
     }
-    
-    async fn run_single_job(&self, tx: flume::Sender<Event>, ) -> Result<(), Error> {
-        let mut transaction = self.conn.begin().await?;
-        let job = Self::get_single_job(tx, &mut transaction).await?;
+
+    fn run_single_sync_job(&self, tx: Sender<Event>) -> Result<(), Error> {
+        todo!() 
+        /*
+        self.pool.spawn_fifo(move || {
+            match perform_fn.perform_sync(job.data, &env, &mut transaction) {
+                Ok(_) => futures::executor::block_on(db::delete_succesful_job(&mut transaction, job.id)).unwrap(),
+                Err(_) => futures::executor::block_on(db::update_failed_job(&mut transaction, job.id)).unwrap(),
+            }
+            futures::executor::block_on(transaction.commit()).unwrap();
+        });
+        */
+    }
+/*
+    async fn run_single_async_job(&self, tx: flume::Sender<Event>) -> Result<(), Error> 
+    {
+        // let mut transaction = self.conn.begin().await?;
+        // let job = Self::get_single_job(tx, &mut transaction, Some(true)).await?;
         
         let job = if job.is_none() {
             return Ok(());
@@ -186,48 +206,116 @@ impl<Env: Send + Sync + 'static> Runner<Env> {
             .ok_or_else(|| PerformError::UnknownJob(job.job_type.to_string()))?;
 
         // need to unwind this
-        if perform_fn.is_async() {
-            self.executor.spawn(async move {
-                println!("Spawned");
-                let res = perform_fn.perform_async(job.data, env, &mut transaction).await;
-                match  res {
-                    Ok(_) => db::delete_succesful_job(&mut transaction, job.id).await.unwrap(),
+        self.executor.spawn(async move {
+            println!("Spawned");
+            let res = perform_fn.perform_async(job.data, env, &mut transaction).await;
+            match  res {
+                Ok(_) => db::delete_succesful_job(&mut transaction, job.id).await.unwrap(),
+                Err(e) => {
+                    println!("{:?}", e);
+                    db::update_failed_job(&mut transaction, job.id).await.unwrap()
+                },
+            }
+            transaction.commit().await.unwrap();
+        })?;
+        Ok(())
+    }
+*/
+
+    async fn get_single_async_job<F>(&self, tx: Sender<Event>, fun: F) -> Result<(), PerformError> 
+    where
+        F: FnOnce(db::BackgroundJob) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>> + Send + UnwindSafe + 'static
+    {
+        let conn = self.conn.clone();
+        self.executor.spawn_with_handle(async move {
+            let mut transaction = match conn.begin().await {
+                    Ok(t) => t,
                     Err(e) => {
-                        println!("{:?}", e);
-                        db::update_failed_job(&mut transaction, job.id).await.unwrap()
-                    },
+                        let fut = tx.send(Event::ErrorLoadingJob(e.into()));
+                        fut.await;
+                        return Ok(());
+                    }
+            };
+            let job = match db::find_next_unlocked_job(&mut transaction, Some(true)).await {
+                Ok(Some(j)) => { 
+                    let _ = tx.send(Event::Working).await;
+                    j 
+                },
+                Ok(None) => {
+                    let _ = tx.send(Event::NoJobAvailable).await;
+                    return Ok(());
+                },
+                Err(e) =>  {
+                    let _ = tx.send(Event::ErrorLoadingJob(e.into())).await;
+                    return Ok(());
                 }
-                transaction.commit().await.unwrap();
-            })?;
-        } else {
-            self.pool.spawn_fifo(move || {
-                match perform_fn.perform_sync(job.data, &env, &mut transaction) {
-                    Ok(_) => futures::executor::block_on(db::delete_succesful_job(&mut transaction, job.id)).unwrap(),
-                    Err(_) => futures::executor::block_on(db::update_failed_job(&mut transaction, job.id)).unwrap(),
-                }
-                futures::executor::block_on(transaction.commit()).unwrap();
-            });
-        }
+            };
+            fun(job).await
+        });
         Ok(())
     }
 
-    async fn get_single_job(tx: flume::Sender<Event>, conn: impl Executor<'_, Database=Postgres>) -> Result<Option<db::BackgroundJob>, Error> {
-        let job = match db::find_next_unlocked_job(conn).await {
-            Ok(Some(j)) => { 
-                let _ = tx.send_async(Event::Working).await;
-                j 
-            },
-            Ok(None) => {
-                let _ = tx.send_async(Event::NoJobAvailable).await;
-                return Ok(None);
-            },
-            Err(e) =>  {
-                let _ = tx.send_async(Event::ErrorLoadingJob(e.into())).await;
-                return Ok(None);
-            }
-        };
-        Ok(Some(job))
+    fn get_single_sync_job<F>(&self, tx: Sender<Event>, fun: F) 
+    where
+        F: FnOnce(db::BackgroundJob) -> Result<(), PerformError> + Send + UnwindSafe + 'static
+    {
+        let conn = self.conn.clone();
+        self.pool.spawn_fifo(move || {
+            let res = move || -> Result<(), PerformError> {
+                let mut transaction = match block_on(conn.begin()) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        let _ = block_on(tx.send(Event::ErrorLoadingJob(e.into())));
+                        return Ok(());
+                    }
+                };
+                let job = match block_on(db::find_next_unlocked_job(&mut transaction, Some(false))) {
+                    Ok(Some(j)) => { 
+                        let _ = block_on(tx.send(Event::Working));
+                        j 
+                    },
+                    Ok(None) => {
+                        let _ = block_on(tx.send(Event::NoJobAvailable));
+                        return Ok(());
+                    },
+                    Err(e) =>  {
+                        let _ = block_on(tx.send(Event::ErrorLoadingJob(e.into())));
+                        return Ok(());
+                    }
+                };
+                fun(job)
+            };
+            res().unwrap()
+        });
     }
+
+    /*
+    async fn get_single_job<F>(&self, tx: Sender<Event>, is_async: Option<bool>, fun: F) -> Result<(), PerformError> 
+    where
+        F: FnOnce(db::BackgroundJob) -> Result<(), PerformError>
+    {
+        match is_async {
+            Some(true) => {
+                self.get_single_async_job(tx, |job| async move { fun(job) }.boxed() )
+            },
+            Some(false) => {
+                            },
+            None => {
+                todo!();
+            }
+        }
+    }
+   */ 
+    /*
+    fn spawn_async<F>(&self, tx: flume::Sender<Event>, conn: impl Executor<'_, Database=Postgres>, fun: F) -> Result<(), Error> 
+    where 
+        F: FnOnce() -> Result<(), PerformError> + Send + UnwindSafe + 'static,
+    {
+        self.executor.spawn(async move {
+            fun()
+        })?;
+    }
+    */
 }
 
 
@@ -310,7 +398,7 @@ mod tests {
     
         let pool = runner.conn.clone();
 
-        let (tx, _) = flume::bounded(10);
+        let (tx, _) = channel::bounded(10);
         let tx0 = tx.clone();
         let pool0 = pool.clone();
         let handle0 = smol::block_on(async move {
