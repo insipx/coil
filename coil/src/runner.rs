@@ -23,7 +23,6 @@ use futures::{Future, StreamExt, future::FutureExt, executor::block_on};
 use crate::{db, error::*, registry::Registry};
 use std::pin::Pin;
 use sqlx::Postgres;
-use sqlx::prelude::*;
 use channel::Sender;
 use std::any::Any;
 
@@ -125,8 +124,11 @@ pub struct Runner<Env> {
 }
 
 enum Event {
+    /// Queues are currently working
     Working,
+    /// No more jobs available in queue
     NoJobAvailable,
+    /// An error occurred loading the job from the database
     ErrorLoadingJob(Error),
     /// Test for waiting on dummy tasks
     #[cfg(test)]
@@ -208,7 +210,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     .ok_or_else(|| PerformError::UnknownJob(job.job_type.to_string()))?;
                 perform_fn.perform_async(job.data, env, &mut *conn).await
             }.boxed()
-        });
+        })?;
         Ok(())
     }
 
@@ -224,7 +226,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         Ok(())
     }
 
-    fn get_single_async_job<F>(&self, tx: Sender<Event>, fun: F) 
+    fn get_single_async_job<F>(&self, tx: Sender<Event>, fun: F)  -> Result<(), Error>
     where
         F: FnOnce(db::BackgroundJob) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>> + Send + 'static
     {
@@ -264,7 +266,8 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     eprintln!("{:?}", e);
                 }
             };
-        });
+        })?;
+        Ok(())
     }
 
     fn get_single_sync_job<F>(&self, tx: Sender<Event>, fun: F) 
@@ -313,10 +316,10 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
             Ok(_) => {
                 db::delete_successful_job(&mut trx, job_id).await.map_err(|e| {
                     panic!("Failed to update job: {:?}", e);
-                });
+                }).expect("Panic is mapped");
                 trx.commit().await.map_err(|e| {
                     panic!("Failed to commit transaction {:?}", e);
-                });
+                }).expect("Panic is mapped");
             },
             Err(e) => {
                 eprintln!("Job {} failed to run: {}", job_id, e);
@@ -432,7 +435,7 @@ mod tests {
                     tx0.send(Event::Dummy).await;
                     Ok(())
                 }.boxed()
-            });
+            }).unwrap();
 
             fetch_barrier2.0.wait();
             let tx0 = tx.clone();
@@ -443,7 +446,7 @@ mod tests {
                     tx0.send(Event::Dummy).await;
                     Ok(())
                 }.boxed()
-            });
+            }).unwrap();
             runner.wait_for_all_tasks(rx, 2).await;
         });
     }

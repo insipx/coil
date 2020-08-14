@@ -69,10 +69,6 @@ impl<Env: 'static> Registry<Env> {
             _marker: PhantomData,
         })
     }
-
-    pub fn is_async(&self, job_type: &str) -> Option<bool> {
-        self.jobs.get(job_type).map(|j| j.is_async())
-    }
 }
 
 /// Register a job to be run by coil. This must be called for any

@@ -16,7 +16,7 @@
 
 use crate::error::{EnqueueError, PerformError};
 use serde::{Serialize, de::DeserializeOwned};
-use sqlx::{PgPool, Postgres, PgConnection};
+use sqlx::{PgPool, PgConnection};
 use std::sync::Arc;
 
 #[async_trait::async_trait]
