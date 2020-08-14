@@ -40,13 +40,13 @@ async fn resize_image<E: Serialize + DeserializeOwned + 'static + Send>(name: St
 */
 
 #[coil::background_job]
-async fn resize_image(name: String) -> Result<(), coil::PerformError> {
+fn resize_image(name: String) -> Result<(), coil::PerformError> {
     println!("{}", name);
     Ok(())
 }
 
 #[coil::background_job]
-async fn resize_image_gen<E: Serialize + DeserializeOwned + Send + std::fmt::Display>(some: E) -> Result<(), coil::PerformError> {
+fn resize_image_gen<E: Serialize + DeserializeOwned + Send + std::fmt::Display>(some: E) -> Result<(), coil::PerformError> {
     println!("{}", some);
     Ok(())
 }

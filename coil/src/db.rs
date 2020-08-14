@@ -64,7 +64,7 @@ pub async fn find_next_unlocked_job(conn: impl Executor<'_, Database=Postgres>, 
     if let Some(a) = is_async {
         match a {
             true => sqlx::query_as!(BackgroundJob, "SELECT id, job_type, data, is_async FROM _background_tasks WHERE is_async = true ORDER BY id FOR UPDATE SKIP LOCKED").fetch_optional(conn).await.map_err(Into::into),
-            false => sqlx::query_as!(BackgroundJob, "SELECT id, job_type, data, is_async FROM _background_tasks WHERE is_async = true ORDER BY id FOR UPDATE SKIP LOCKED").fetch_optional(conn).await.map_err(Into::into),
+            false => sqlx::query_as!(BackgroundJob, "SELECT id, job_type, data, is_async FROM _background_tasks WHERE is_async = false ORDER BY id FOR UPDATE SKIP LOCKED").fetch_optional(conn).await.map_err(Into::into),
         }
     } else {
         sqlx::query_as!(BackgroundJob, "SELECT id, job_type, data, is_async FROM _background_tasks ORDER BY id FOR UPDATE SKIP LOCKED")

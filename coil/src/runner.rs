@@ -156,7 +156,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
             };
             
             for _ in 0..jobs_to_queue {
-                self.run_single_async_job(tx.clone()).await;
+                self.run_single_sync_job(tx.clone());
             }
             
             pending_messages += jobs_to_queue;
