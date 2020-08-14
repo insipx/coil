@@ -331,9 +331,8 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 trx.commit().await.map_err(|e| {
                     panic!("Failed to commit transaction {:?}", e);
                 }).expect("Panic is mapped");
-                if let Some(f) = on_finish {
-                    f(job_id)
-                }
+                
+                on_finish.map(|f| f(job_id));
             },
             Err(e) => {
                 eprintln!("Job {} failed to run: {}", job_id, e);
@@ -523,7 +522,6 @@ mod tests {
 
         create_dummy_job(&runner, false);
         
-        let tx0 = tx.clone();
         runner.get_single_sync_job(tx.clone(), move |_| Ok(()));
         smol::block_on(runner.wait_for_all_tasks(rx, 1));
          
