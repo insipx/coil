@@ -128,6 +128,9 @@ enum Event {
     Working,
     NoJobAvailable,
     ErrorLoadingJob(Error),
+    /// Test for waiting on dummy tasks
+    #[cfg(test)]
+    Dummy
 }
 
 impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
@@ -171,6 +174,26 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     }
                 },
                 _ = timeout.fuse() => return Err(CommError::NoMessage.into())
+            };
+        }
+    }
+    
+    /// Wait for tasks to finish based on timeout
+    /// this is mostly used for internal tests
+    #[cfg(test)] 
+    async fn wait_for_all_tasks(&self, mut rx: channel::Receiver<Event>, pending: usize) {
+        let mut dummy_tasks = pending;
+        while dummy_tasks > 0 {
+            let timeout = timer::Delay::new(std::time::Duration::from_secs(5));
+            futures::select! {
+                msg = rx.next().fuse() => match msg {
+                    Some(Event::Working) => continue,
+                    Some(Event::NoJobAvailable) => break,
+                    Some(Event::Dummy) => dummy_tasks -= 1,
+                    None => panic!("Test Failed"),
+                    _ => panic!("Test Failed"),
+                },
+                _ = timeout.fuse() => panic!("Timed out"),
             };
         }
     }
@@ -361,16 +384,18 @@ mod tests {
         let pool = smol::block_on(sqlx::PgPool::connect(database_url.as_str())).unwrap();
         crate::Runner::build((), Executor, pool)
             .num_threads(2)
-            .max_tasks(2)
             .build()
             .unwrap()
     }
 
-    fn create_dummy_job(runner: &Runner<()>) -> i64 {
+    fn create_dummy_job(runner: &Runner<()>, is_async: bool) -> i64 {
         let data = rmp_serde::to_vec(vec![0].as_slice()).unwrap();
         smol::block_on(async move {
             let mut conn = runner.connection().await.unwrap();
-            let rec = sqlx::query!("INSERT INTO _background_tasks (job_type, data) VALUES ($1, $2) RETURNING (id, job_type, data)", "Foo", data)
+            let rec = sqlx::query!("INSERT INTO _background_tasks (job_type, data, is_async) 
+            VALUES ($1, $2, $3) 
+            RETURNING (id, job_type, data)", "Foo", data, is_async
+            )
                 .fetch_one(&mut conn)
                 .await
                 .unwrap();
@@ -383,11 +408,11 @@ mod tests {
     }
 
     #[test]
-    fn jobs_are_locked_when_fetched() {
+    fn async_jobs_are_locked_when_fetched() {
         let _guard = TestGuard::lock();
         let runner = runner();
-        let first_job_id = create_dummy_job(&runner);
-        let second_job_id = create_dummy_job(&runner);
+        let first_job_id = create_dummy_job(&runner, true);
+        let second_job_id = create_dummy_job(&runner, true);
         let fetch_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
         let fetch_barrier2 = fetch_barrier.clone();
         let return_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
@@ -395,31 +420,66 @@ mod tests {
     
         let pool = runner.conn.clone();
 
-        let (tx, _) = channel::bounded(10);
+        let (tx, rx) = channel::bounded(10);
         let tx0 = tx.clone();
         let pool0 = pool.clone();
-        let handle0 = smol::block_on(async move {
-            let mut transaction = pool0.begin().await.unwrap();
-            std::thread::spawn(move ||{
-                let job = smol::block_on(Runner::<()>::get_single_job(tx0, &mut transaction)).unwrap().unwrap();
-                fetch_barrier.0.wait();
-                assert_eq!(first_job_id, job.id);
-                return_barrier.0.wait();
-            })
+        smol::run(async move { 
+            runner.get_single_async_job(tx.clone(), move |job| {
+                async move {
+                    fetch_barrier.0.wait();
+                    assert_eq!(first_job_id, job.id);
+                    return_barrier.0.wait();
+                    tx0.send(Event::Dummy).await;
+                    Ok(())
+                }.boxed()
+            });
+
+            fetch_barrier2.0.wait();
+            let tx0 = tx.clone();
+            runner.get_single_async_job(tx.clone(), move |job| {
+                async move {
+                    assert_eq!(second_job_id, job.id);
+                    return_barrier2.0.wait();
+                    tx0.send(Event::Dummy).await;
+                    Ok(())
+                }.boxed()
+            });
+            runner.wait_for_all_tasks(rx, 2).await;
         });
-        
-        fetch_barrier2.0.wait();
-        let tx1 = tx.clone();
-        let handle1 = smol::block_on(async move {
-            let mut transaction = pool.begin().await.unwrap();
-            std::thread::spawn(move || {
-                let job = smol::block_on(Runner::<()>::get_single_job(tx1, &mut transaction)).unwrap().unwrap();
-                assert_eq!(second_job_id, job.id);
-                return_barrier2.0.wait();
-            })
+    }
+    
+    #[test]
+    fn sync_jobs_are_locked_when_fetched() {
+        let _guard = TestGuard::lock();
+        let runner = runner();
+        let first_job_id = create_dummy_job(&runner, false);
+        let second_job_id = create_dummy_job(&runner, false);
+        let fetch_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
+        let fetch_barrier2 = fetch_barrier.clone();
+        let return_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
+        let return_barrier2 = return_barrier.clone();
+    
+        let pool = runner.conn.clone();
+
+        let (tx, rx) = channel::bounded(10);
+        let tx0 = tx.clone();
+        let pool0 = pool.clone();
+        runner.get_single_sync_job(tx.clone(), move |job| {
+            fetch_barrier.0.wait();
+            assert_eq!(first_job_id, job.id);
+            return_barrier.0.wait();
+            smol::block_on(tx0.send(Event::Dummy));
+            Ok(())
         });
 
-        handle0.join();
-        handle1.join();
+        fetch_barrier2.0.wait();
+        let tx0 = tx.clone();
+        runner.get_single_sync_job(tx.clone(), move |job| {
+            assert_eq!(second_job_id, job.id);
+            return_barrier2.0.wait();
+            smol::block_on(tx0.send(Event::Dummy));
+            Ok(())
+        });
+        smol::block_on(runner.wait_for_all_tasks(rx, 2));
     }
 }
