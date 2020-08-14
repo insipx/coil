@@ -86,7 +86,7 @@ impl<Env: 'static> Builder<Env> {
     }
     
     /// Provide a hook that runs after a job has finished and all destructors have run
-    pub fn on_finish(mut self, on_finish: impl Fn(i64) + Send + Sync + 'static) -> Self {
+    pub fn on_finish(mut self, on_finish: impl Fn(i64) + Send + Sync + Copy + 'static) -> Self {
         self.on_finish = Some(Arc::new(on_finish));
         self
     }
@@ -129,7 +129,7 @@ pub struct Runner<Env> {
     registry: Arc<Registry<Env>>,
     /// maximum number of tasks to run at any one time
     max_tasks: usize,
-    on_finish: Option<Arc<Fn(i64) + Send + Sync + 'static>>
+    on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>
 }
 
 enum Event {
