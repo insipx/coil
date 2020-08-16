@@ -40,7 +40,7 @@ jobs:
       - name: Run cargo-tarpaulin
         uses: actions-rs/tarpaulin@v0.1
         with:
-          version: '0.9.0'
+          version: '0.14.2'
           args: '-- --test-threads 1'
           timeout: "300"
         env:
