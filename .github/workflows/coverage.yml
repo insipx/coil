@@ -46,7 +46,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-        args: --no-fail-fast
+          args: --no-fail-fast
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
           CARGO_INCREMENTAL: '0'
