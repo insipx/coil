@@ -40,7 +40,6 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: -- --nocapture
         env:
           # Tests get the pg url from the environment directly
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
