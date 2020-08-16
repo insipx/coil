@@ -437,6 +437,7 @@ mod tests {
 
     #[test]
     fn async_jobs_are_locked_when_fetched() {
+        crate::initialize();
         let _guard = TestGuard::lock();
         let runner = runner();
         let first_job_id = create_dummy_job(&runner, true);
@@ -478,6 +479,7 @@ mod tests {
     
     #[test]
     fn sync_jobs_are_locked_when_fetched() {
+        crate::initialize();
         let _guard = TestGuard::lock();
         let runner = runner();
         let first_job_id = create_dummy_job(&runner, false);
@@ -513,6 +515,7 @@ mod tests {
     
     #[test]
     fn jobs_are_deleted_when_successfully_run() {
+        crate::initialize();
         let _guard = TestGuard::lock();
         
         let(tx, rx) = channel::bounded(10);

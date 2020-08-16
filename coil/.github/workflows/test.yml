@@ -36,14 +36,6 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - name: install sqlx-cli
-        uses: actions-rs/checkout@v2
-        uses: actions-rs/install@v0.1
-        with:
-          crate: sqlx-cli
-          version: version=0.1.0-beta.1
-          features: postgres
-        run: cargo sqlx run
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:

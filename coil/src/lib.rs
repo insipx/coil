@@ -40,3 +40,23 @@ pub use crate::error::*;
 pub use crate::db::migrate;
 pub use coil_proc_macro::*;
 pub use crate::runner::{Runner, Builder as RunnerBuilder};
+
+
+#[cfg(test)]
+use std::sync::Once;
+#[cfg(test)]
+use sqlx::Connection;
+#[cfg(test)]
+static INIT: Once = Once::new();
+
+#[cfg(test)]
+pub fn initialize() {
+    INIT.call_once(|| {
+        let url = dotenv::var("DATABASE_URL").unwrap();
+        println!("Running migrations...at {}", url);
+        let mut conn = smol::block_on(sqlx::PgConnection::connect(url.as_str())).unwrap();
+        smol::block_on(crate::migrate(&mut conn)).unwrap();
+    });
+}
+
+
