@@ -453,7 +453,7 @@ mod tests {
                     fetch_barrier.0.wait();
                     assert_eq!(first_job_id, job.id);
                     return_barrier.0.wait();
-                    tx0.send(Event::Dummy).await;
+                    tx0.send(Event::Dummy).await.unwrap();
                     Ok(())
                 }.boxed()
             }).unwrap();
@@ -464,7 +464,7 @@ mod tests {
                 async move {
                     assert_eq!(second_job_id, job.id);
                     return_barrier2.0.wait();
-                    tx0.send(Event::Dummy).await;
+                    tx0.send(Event::Dummy).await.unwrap();
                     Ok(())
                 }.boxed()
             }).unwrap();
@@ -492,7 +492,7 @@ mod tests {
             fetch_barrier.0.wait();
             assert_eq!(first_job_id, job.id);
             return_barrier.0.wait();
-            smol::block_on(tx0.send(Event::Dummy));
+            smol::block_on(tx0.send(Event::Dummy)).unwrap();
             Ok(())
         });
 
@@ -501,7 +501,7 @@ mod tests {
         runner.get_single_sync_job(tx.clone(), move |job| {
             assert_eq!(second_job_id, job.id);
             return_barrier2.0.wait();
-            smol::block_on(tx0.send(Event::Dummy));
+            smol::block_on(tx0.send(Event::Dummy)).unwrap();
             Ok(())
         });
         smol::block_on(runner.wait_for_all_tasks(rx, 2));
@@ -516,7 +516,7 @@ mod tests {
         let mut runner = runner();
         let tx0 = tx.clone();
         runner.on_finish = Some(Arc::new(move |job_id| {
-            smol::block_on(tx0.send(Event::Dummy));
+            smol::block_on(tx0.send(Event::Dummy)).unwrap();
         }));
         let mut conn = smol::block_on(runner.connection()).unwrap();
 

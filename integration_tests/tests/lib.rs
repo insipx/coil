@@ -1,5 +1,17 @@
 use coil::Job;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use sqlx::Connection;
+use std::sync::Once;
+
+static INIT: Once = Once::new();
+
+pub fn initialize() {
+    INIT.call_once(|| {
+        let url = dotenv::var("DATABASE_URL").unwrap();
+        let mut conn = smol::block_on(sqlx::PgConnection::connect(url.as_str())).unwrap();
+        smol::block_on(coil::migrate(&mut conn)).unwrap();
+    });
+}
 
 #[test]
 fn it_works() {

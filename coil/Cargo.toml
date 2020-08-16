@@ -28,3 +28,4 @@ smol = "0.3"
 
 [features]
 nightly = []
+offline = ["sqlx/offline"]
