@@ -372,7 +372,6 @@ mod tests {
     impl<'a> TestGuard<'a> {
         fn lock() -> Self {
             TestGuard(TEST_MUTEX.lock().unwrap())
-
         }
     }
 
