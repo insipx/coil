@@ -29,10 +29,10 @@ jobs:
           - 5432:5432
     steps:
       - name: Checkout Repository
-      - uses: actions/checkout@v1
+        uses: actions/checkout@v1
 
       - name: Install Stable Toolchain
-      - uses: actions-rs/toolchain@v1
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
