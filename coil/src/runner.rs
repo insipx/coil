@@ -438,7 +438,7 @@ mod tests {
     fn async_jobs_are_locked_when_fetched() {
         crate::initialize();
         let _guard = TestGuard::lock();
-        let runner = runner();
+        let mut runner = runner();
         let first_job_id = create_dummy_job(&runner, true);
         let second_job_id = create_dummy_job(&runner, true);
         let fetch_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
@@ -450,6 +450,9 @@ mod tests {
 
         let (tx, rx) = channel::bounded(10);
         let tx0 = tx.clone();
+        runner.on_finish = Some(Arc::new(move |job_id| {
+            smol::block_on(tx0.send(Event::Dummy)).unwrap();
+        }));
         let pool0 = pool.clone();
         smol::run(async move { 
             runner.get_single_async_job(tx.clone(), move |job| {
@@ -457,7 +460,6 @@ mod tests {
                     fetch_barrier.0.wait();
                     assert_eq!(first_job_id, job.id);
                     return_barrier.0.wait();
-                    tx0.send(Event::Dummy).await.unwrap();
                     Ok(())
                 }.boxed()
             }).unwrap();
@@ -468,7 +470,6 @@ mod tests {
                 async move {
                     assert_eq!(second_job_id, job.id);
                     return_barrier2.0.wait();
-                    tx0.send(Event::Dummy).await.unwrap();
                     Ok(())
                 }.boxed()
             }).unwrap();
@@ -480,7 +481,7 @@ mod tests {
     fn sync_jobs_are_locked_when_fetched() {
         crate::initialize();
         let _guard = TestGuard::lock();
-        let runner = runner();
+        let mut runner = runner();
         let first_job_id = create_dummy_job(&runner, false);
         let second_job_id = create_dummy_job(&runner, false);
         let fetch_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
@@ -489,24 +490,24 @@ mod tests {
         let return_barrier2 = return_barrier.clone();
     
         let pool = runner.conn.clone();
-
+        
         let (tx, rx) = channel::bounded(10);
         let tx0 = tx.clone();
+        runner.on_finish = Some(Arc::new(move |job_id| {
+            smol::block_on(tx0.send(Event::Dummy)).unwrap();
+        }));
         let pool0 = pool.clone();
         runner.get_single_sync_job(tx.clone(), move |job| {
             fetch_barrier.0.wait();
             assert_eq!(first_job_id, job.id);
             return_barrier.0.wait();
-            smol::block_on(tx0.send(Event::Dummy)).unwrap();
             Ok(())
         });
 
         fetch_barrier2.0.wait();
-        let tx0 = tx.clone();
         runner.get_single_sync_job(tx.clone(), move |job| {
             assert_eq!(second_job_id, job.id);
             return_barrier2.0.wait();
-            smol::block_on(tx0.send(Event::Dummy)).unwrap();
             Ok(())
         });
         smol::block_on(runner.wait_for_all_tasks(rx, 2));
