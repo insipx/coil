@@ -379,7 +379,7 @@ mod tests {
     impl<'a> Drop for TestGuard<'a> {
         fn drop(&mut self) {
             smol::block_on(async move {
-                sqlx::query!("TRUNCATE TABLE _background_tasks")
+                sqlx::query("TRUNCATE TABLE _background_tasks")
                     .execute(&mut runner().connection().await.unwrap())
                     .await
                     .unwrap()
@@ -408,10 +408,14 @@ mod tests {
         let data = rmp_serde::to_vec(vec![0].as_slice()).unwrap();
         smol::block_on(async move {
             let mut conn = runner.connection().await.unwrap();
-            let rec = sqlx::query!("INSERT INTO _background_tasks (job_type, data, is_async) 
-            VALUES ($1, $2, $3) 
-            RETURNING (id, job_type, data)", "Foo", data, is_async
+            let rec = sqlx::query(
+            "INSERT INTO _background_tasks (job_type, data, is_async) 
+                VALUES ($1, $2, $3) 
+                RETURNING (id, job_type, data)"
             )
+                .bind("Foo")
+                .bind(data)
+                .bind(is_async)
                 .fetch_one(&mut conn)
                 .await
                 .unwrap();

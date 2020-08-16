@@ -8,6 +8,7 @@ static INIT: Once = Once::new();
 pub fn initialize() {
     INIT.call_once(|| {
         let url = dotenv::var("DATABASE_URL").unwrap();
+        println!("Running migrations...at {}", url);
         let mut conn = smol::block_on(sqlx::PgConnection::connect(url.as_str())).unwrap();
         smol::block_on(coil::migrate(&mut conn)).unwrap();
     });
@@ -15,6 +16,7 @@ pub fn initialize() {
 
 #[test]
 fn it_works() {
+    initialize();
     assert_eq!(2 + 2, 4);
 }
 
@@ -105,6 +107,7 @@ fn enqueue_5_jobs() {
 
 #[test]
 fn enqueue_5_jobs_limited_size() {
+    initialize();
     let pool = smol::block_on(sqlx::PgPool::connect(
         "postgres://archive:default@localhost:5432/test_job_queue",
     ))
@@ -142,6 +145,7 @@ fn enqueue_5_jobs_limited_size() {
 
 #[test]
 fn enqueue_5_jobs_generic() {
+    initialize();
     let pool = smol::block_on(sqlx::PgPool::connect(
         "postgres://archive:default@localhost:5432/test_job_queue",
     ))

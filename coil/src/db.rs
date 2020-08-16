@@ -45,7 +45,7 @@ pub struct BackgroundJob {
 /// );
 /// ```
 pub async fn migrate(pool: impl Acquire<'_, Database=Postgres>) -> Result<(), Error> {
-    sqlx::migrate!("src/migrations/").run(pool).await.map_err(Into::into)
+    sqlx::migrate!("./migrations").run(pool).await.map_err(Into::into)
 }
 
 pub async fn enqueue_job<T: Job>(conn: impl Executor<'_, Database=Postgres>, job: T) -> Result<(), EnqueueError> {
