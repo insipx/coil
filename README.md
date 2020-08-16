@@ -3,7 +3,7 @@
 # Coil
 An async task queue built with SQLx, Postgres, and Rayon
 
-![](https://github.com/insipx/coil/workflows/Unit and Integration Tests/badge.svg)
+![](https://github.com/insipx/coil/workflows/Unit\ and\ Integration\ Tests/badge.svg)
 
 </div>
 
