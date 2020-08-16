@@ -2,7 +2,10 @@
 
 # Coil
 An async task queue built with SQLx, Postgres, and Rayon
-![tests](https://github.com/insipx/coil/workflows/test/badge.svg)
+
+![](https://github.com/insipx/coil/workflows/Unit and Integration Tests/badge.svg)
+
+</div>
 
 Coil is built first for use in [`substrate-archive`](https://github.com/paritytech/substrate-archive) and takes heavily from [swirl](https://github.com/sgrif/swirl)
 
@@ -12,7 +15,6 @@ Supports synchronous and asynchronous jobs. Synchronous jobs will be spawned int
 
 <sub><sup>†† Portions of this software are licensed as MIT. See the [License](#license) section
 
-</div>
 ---
 
 ### Examples
