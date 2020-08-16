@@ -42,8 +42,5 @@ jobs:
           command: test
           args: -- --nocapture
         env:
-          # The hostname used to communicate with the PostgreSQL service container
-          POSTGRES_HOST: localhost
-          # The default PostgreSQL port
-          POSTGRES_PORT: 5432
+          # Tests get the pg url from the environment directly
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
