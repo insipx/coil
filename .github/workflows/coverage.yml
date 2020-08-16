@@ -34,20 +34,31 @@ jobs:
       - name: Install Stable Toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: nightly
           override: true
 
-      - name: Run cargo-tarpaulin
-        uses: actions-rs/tarpaulin@v0.1
+      - name: Cargo Clean
+        uses: actions-rs/cargo@v1
         with:
-          version: '0.14.2'
-          timeout: "600"
+          command: clean
+
+      - name: Run Tests for Coverage
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+        args: --no-fail-fast
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          CARGO_INCREMENTAL: '0'
+          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+          RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+
+      - id: coverage
+        uses: actions-rs/grcov@v0.1
 
       - name: Coveralls upload
         uses: coverallsapp/github-action@master
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          parallel: true
+          # path-to-lcov: './lcov.info'
           path-to-lcov: ${{ steps.coverage.outputs.report }}
