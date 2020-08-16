@@ -60,7 +60,7 @@ runner.run_all_pending_tasks().await.unwrap()
 ```
 
 ### Differences from [`swirl`](https://github.com/sgrif/swirl)
-- Supports asyncronous jobs/executors
+- Supports asynchronous jobs/executors
 - Supports Jobs with Generic Arguments
 - Serializes data into Postgres with Messagepack instead of Json. 
 - In asynchronous jobs, database queries will be run asynchronously with SQLx
