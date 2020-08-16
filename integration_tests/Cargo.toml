@@ -16,6 +16,7 @@ futures = "0.3.5"
 dotenv = "0.15.0"
 pretty_env_logger = "0.4.0"
 log = "0.4.11"
+once_cell = "1.4.0"
 
 [[test]]
 name = "integration_tests"

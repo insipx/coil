@@ -2,6 +2,11 @@ use coil::Job;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sqlx::Connection;
 use std::sync::Once;
+use once_cell::sync::Lazy;
+
+static DATABASE_URL: Lazy<String> = Lazy::new(|| {
+    dotenv::var("DATABASE_URL").unwrap()
+});
 
 static INIT: Once = Once::new();
 
@@ -108,9 +113,7 @@ fn enqueue_5_jobs() {
 #[test]
 fn enqueue_5_jobs_limited_size() {
     initialize();
-    let pool = smol::block_on(sqlx::PgPool::connect(
-        "postgres://archive:default@localhost:5432/test_job_queue",
-    ))
+    let pool = smol::block_on(sqlx::PgPool::connect(&DATABASE_URL))
     .unwrap();
 
     smol::run(async move {
@@ -146,9 +149,7 @@ fn enqueue_5_jobs_limited_size() {
 #[test]
 fn enqueue_5_jobs_generic() {
     initialize();
-    let pool = smol::block_on(sqlx::PgPool::connect(
-        "postgres://archive:default@localhost:5432/test_job_queue",
-    ))
+    let pool = smol::block_on(sqlx::PgPool::connect(&DATABASE_URL))
     .unwrap();
 
     smol::run(async move {
