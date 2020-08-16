@@ -8,13 +8,13 @@ An async task queue built with SQLx, Postgres, and Rayon
 
 </div>
 
-Coil is built first for use in [`substrate-archive`](https://github.com/paritytech/substrate-archive) and takes heavily from [swirl](https://github.com/sgrif/swirl)
+Coil is built first for use in [`substrate-archive`](https://github.com/paritytech/substrate-archive). It is heavily inspired by and takes heavily from [swirl](https://github.com/sgrif/swirl). In many places of the codebase, code is very similiar.
 
 Supports synchronous and asynchronous jobs. Synchronous jobs will be spawned into a threadpool managed by [`rayon`](https://github.com/rayon-rs/rayon). Async jobs will be spawned onto an executor. The only requirement is that the executor implements the futures `Spawn` trait. This way, `coil` supports `Tokio`, `smol`, and `async-std`.
 
-<sub><sup>† This software is alpha, and not intended for production use yet
+<sub><sup>† This software is alpha, and not intended for production use yet. Use at your own risk.
 
-<sub><sup>†† Portions of this software are licensed as MIT. See the [License](#license) section
+<sub><sup>†† This software is sublicensed as GPLv3. Portions from `swirl` are licensed under MIT. See the [License](#license) section
 
 ---
 

@@ -17,7 +17,7 @@
 //! Database Operations for getting and deleting jobs
 
 use crate::job::Job;
-use crate::error::{EnqueueError, Error};
+use crate::error::{EnqueueError, Error, PerformError};
 use sqlx::prelude::*;
 use sqlx::Postgres;
 
@@ -83,10 +83,11 @@ pub async fn delete_successful_job(conn: impl Executor<'_, Database=Postgres>, i
     Ok(())
 }
 
-pub async fn update_failed_job(conn: impl Executor<'_, Database=Postgres>, id: i64) {
-    let _ = sqlx::query("UPDATE _background_tasks SET retries = retries + 1, last_retry = NOW() WHERE id = $1")
+pub async fn update_failed_job(conn: impl Executor<'_, Database=Postgres>, id: i64) -> Result<(), PerformError> {
+    sqlx::query("UPDATE _background_tasks SET retries = retries + 1, last_retry = NOW() WHERE id = $1")
         .bind(id)
         .execute(conn)
-        .await;
-}
+        .await?;
+    Ok(())
 
+}

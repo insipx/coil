@@ -53,6 +53,8 @@ pub enum EnqueueError {
 pub enum PerformError {
     #[error("Error decoding task data {0}")]
     Decode(#[from] rmp_serde::decode::Error),
+    #[error("error while updating failed job {0}")]
+    Sql(#[from] sqlx::Error),
     #[error("Trying to perform a async job in a sync context or vice-versa")]
     WrongJob,
     #[error("Unknown Job Type {0}")]
