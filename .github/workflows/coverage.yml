@@ -41,7 +41,7 @@ jobs:
         uses: actions-rs/tarpaulin@v0.1
         with:
           version: '0.14.2'
-          timeout: "300"
+          timeout: "600"
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
 
