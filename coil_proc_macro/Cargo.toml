@@ -1,9 +1,8 @@
 [package]
 name = "coil_proc_macro"
 version = "0.1.0"
-authors = ["Andrew Plaza <andrew.plaza@parity.io", "Sean Griffin <sean@seantheprogrammer.com>"]
+authors = ["Andrew Plaza <andrew.plaza@parity.io"]
 description = "This library should not be used directly, it is re-exported through coil"
-# Can I just make this GPL or is that against the rules?
 license = "GPLv3"
 edition = "2018"
 
@@ -11,7 +10,6 @@ edition = "2018"
 syn = { version = "1.0", features = ["full", "extra-traits"] }
 quote = "1.0"
 proc-macro2 = "1.0"
-async-trait = "0.1.36"
 
 [lib]
 proc-macro = true
