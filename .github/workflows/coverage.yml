@@ -43,6 +43,8 @@ jobs:
           version: '0.9.0'
           args: '-- --test-threads 1'
           timeout: "300"
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
 
       - name: Coveralls upload
         uses: coverallsapp/github-action@master
