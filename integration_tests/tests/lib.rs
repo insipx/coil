@@ -1,3 +1,8 @@
+mod sync;
+mod dummy_jobs;
+mod runner;
+mod test_guard;
+
 use coil::Job;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sqlx::Connection;
@@ -19,10 +24,12 @@ pub fn initialize() {
     });
 }
 
-#[test]
-fn it_works() {
-    initialize();
-    assert_eq!(2 + 2, 4);
+struct Executor;
+impl futures::task::Spawn for Executor {
+    fn spawn_obj(&self, future: futures::task::FutureObj<'static, ()>) -> Result<(), futures::task::SpawnError> {
+        smol::Task::spawn(future).detach();
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -41,22 +48,6 @@ async fn resize_image_async(to_sleep: u64) -> Result<(), coil::PerformError> {
     Ok(())
 }
 
-/*
-#[coil::background_job]
-async fn resize_image(file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
-    println!("Hello");
-    Ok(())
-}
-*/
-/*
-#[coil::background_job]
-async fn resize_image<E: Serialize + DeserializeOwned + 'static + Send>(name: String, some: E) -> Result<(), coil::PerformError> {
-    // println!("File Name: {}, height: {}, width: {}", file_name, dimensions.height, dimensions.width);
-    println!("{}", name);
-    Ok(())
-}
-*/
-
 #[coil::background_job]
 fn resize_image(name: String) -> Result<(), coil::PerformError> {
     println!("{}", name);
@@ -68,46 +59,6 @@ fn resize_image_gen<E: Serialize + DeserializeOwned + Send + std::fmt::Display>(
     println!("{}", some);
     Ok(())
 }
-
-struct Executor;
-impl futures::task::Spawn for Executor {
-    fn spawn_obj(&self, future: futures::task::FutureObj<'static, ()>) -> Result<(), futures::task::SpawnError> {
-        smol::Task::spawn(future).detach();
-        Ok(())
-    }
-}
-
-/*
-#[test]
-fn enqueue_simple_task() {
-    let pool = smol::block_on(sqlx::PgPool::connect("postgres://archive:default@localhost:5432/test_job_queue")).unwrap();
-    resize_image("Hello".to_string(), Size { height: 0, width: 0 }).enqueue(&pool);
-    resize_image_sync("Hello".to_string(), Size { height: 0, width: 0 }).enqueue(&pool);
-    resize_image("Hello".to_string(), Size { height: 0, width: 0}).enqueue(&pool);
-}
-
-#[test]
-fn enqueue_5_jobs() {
-    let pool = smol::block_on(sqlx::PgPool::connect("postgres://archive:default@localhost:5432/test_job_queue")).unwrap();
-    let env = Environment {
-        conn: pool.clone()
-    };
-    smol::run(async move {
-        resize_image("tohru".to_string(), Size { height: 32, width: 32 }).enqueue(&pool).await.unwrap();
-        resize_image("gambit".to_string(), Size { height: 64, width: 64 }).enqueue(&pool).await.unwrap();
-        resize_image("chess".to_string(), Size { height: 128, width: 128 }).enqueue(&pool).await.unwrap();
-        resize_image("kaguya".to_string(), Size { height: 256, width: 256 }).enqueue(&pool).await.unwrap();
-        resize_image("L".to_string(), Size { height: 512, width: 512 }).enqueue(&pool).await.unwrap();
-
-        let runner = coil::RunnerBuilder::new(env, Executor, pool)
-            .num_threads(8)
-            .build()
-            .unwrap();
-        runner.run_all_pending_tasks().await.unwrap();
-        println!("Finished");
-    });
-}
-*/
 
 #[test]
 fn enqueue_5_jobs_limited_size() {
@@ -127,7 +78,7 @@ fn enqueue_5_jobs_limited_size() {
         resize_image("zzz".to_string()).enqueue(&pool).await.unwrap();
         resize_image("xix".to_string()).enqueue(&pool).await.unwrap();
 
-        let runner = coil::RunnerBuilder::new((), Executor, pool)
+        let runner = coil::Builder::new((), Executor, pool)
             .num_threads(8)
             .max_tasks(3)
             .build()
@@ -149,7 +100,7 @@ fn enqueue_5_jobs_generic() {
         resize_image_gen("kaguya".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("L".to_string()).enqueue(&pool).await.unwrap();
 
-        let runner = coil::RunnerBuilder::new((), Executor, pool)
+        let runner = coil::Builder::new((), Executor, pool)
             .num_threads(8)
             .max_tasks(3)
             .register_job::<resize_image_gen::Job<String>>()
@@ -159,30 +110,3 @@ fn enqueue_5_jobs_generic() {
         runner.run_all_sync_tasks().await.unwrap();
     });
 }
-
-/*
-#[test]
-fn enqueue_5_jobs_async() {
-    initialize();
-
-    smol::run(async move {
-        let pool = sqlx::PgPool::connect(&DATABASE_URL).await.unwrap();
-        resize_image_async(2000).enqueue(&pool).await.unwrap();
-        resize_image_async(500).enqueue(&pool).await.unwrap();
-        resize_image_async(100).enqueue(&pool).await.unwrap();
-        resize_image_async(1500).enqueue(&pool).await.unwrap();
-        resize_image_async(250).enqueue(&pool).await.unwrap();
-
-        let time = std::time::Instant::now();
-        let runner = coil::RunnerBuilder::new((), Executor, pool)
-            .num_threads(8)
-            .max_tasks(10)
-            .build()
-            .unwrap();
-        runner.run_all_async_tasks().await.unwrap();
-        let elapsed = time.elapsed();
-        println!("Took {:?}", elapsed);
-        assert!(elapsed.as_secs() < 10);
-    });
-}
-*/

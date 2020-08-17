@@ -79,3 +79,20 @@ impl From<String> for PerformError {
     }
 }
 
+
+#[cfg(any(test, feature = "test_components"))]
+#[derive(Debug, Error)]
+pub enum FailedJobsError {
+    /// Jobs that failed to run
+    #[error("Failed Jobs {0}")]
+    JobsFailed(
+        /// Number of failed jobs
+        i64
+    ),
+    #[error("Sql {0}")]
+    Sql(#[from] sqlx::Error),
+    #[error("{0}")]
+    Enq(#[from] EnqueueError),
+    #[error("{0}")]
+    Err(#[from] Error)
+}

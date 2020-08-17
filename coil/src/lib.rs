@@ -39,7 +39,9 @@ pub use crate::job::*;
 pub use crate::error::*;
 pub use crate::db::migrate;
 pub use coil_proc_macro::*;
-pub use crate::runner::{Runner, Builder as RunnerBuilder};
+pub use crate::runner::{Runner, Builder};
+#[cfg(any(test, feature = "test_components"))]
+pub use crate::runner::Event;
 
 
 #[cfg(test)]

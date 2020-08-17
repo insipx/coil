@@ -117,10 +117,18 @@ pub async fn update_failed_job(
     .await?;
     Ok(())
 }
-
+/*
 pub async fn unlocked_tasks_count(conn: impl Executor<'_, Database = Postgres>, is_async: bool) -> Result<i64, EnqueueError> {
     let count = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM _background_tasks WHERE is_async = $1")
         .bind(is_async)
+        .fetch_one(conn)
+        .await?;
+    Ok(count.0)
+}
+*/
+/// Gets jobs which failed
+pub async fn failed_job_count(conn: impl Executor<'_, Database = Postgres>) -> Result<i64, EnqueueError> {
+    let count = sqlx::query_as::<_, (i64, )>("SELECT COUNT(*) FROM _background_tasks WHERE retries > 0")
         .fetch_one(conn)
         .await?;
     Ok(count.0)

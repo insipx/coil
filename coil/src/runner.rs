@@ -25,6 +25,7 @@ use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe, PanicInfo, RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Builder pattern struct for the Runner
 pub struct Builder<Env> {
@@ -36,7 +37,7 @@ pub struct Builder<Env> {
     registry: Registry<Env>,
     on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
     /// Amount of time to wait until job is deemed a failure
-    timeout: Option<u64>,
+    timeout: Option<Duration>,
 }
 
 impl<Env: 'static> Builder<Env> {
@@ -90,14 +91,15 @@ impl<Env: 'static> Builder<Env> {
 
     /// Provide a hook that runs after a job has finished and all destructors have run
     /// the `on_finish` closure accepts the job ID that finished as an argument
-    pub fn on_finish(mut self, on_finish: impl Fn(i64) + Send + Sync + Copy + 'static) -> Self {
+    pub fn on_finish(mut self, on_finish: impl Fn(i64) + Send + Sync + 'static) -> Self {
         self.on_finish = Some(Arc::new(on_finish));
         self
     }
 
+    // TODO: this description is not true
     /// Set a timeout in seconds.
     /// This is the maximum amount of time we will wait until classifying a task as a failure and updating the retry counter.
-    pub fn timeout(mut self, timeout: u64) -> Self {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
@@ -119,7 +121,7 @@ impl<Env: 'static> Builder<Env> {
             threadpool.current_num_threads()
         };
 
-        let timeout = self.timeout.unwrap_or(5);
+        let timeout = self.timeout.unwrap_or(std::time::Duration::from_secs(5));
         Ok(Runner {
             threadpool,
             executor: self.executor,
@@ -145,10 +147,10 @@ pub struct Runner<Env> {
     /// maximum number of tasks to run at any one time
     max_tasks: usize,
     on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
-    timeout: u64,
+    timeout: Duration,
 }
 
-enum Event {
+pub enum Event {
     /// Queues are currently working
     Working,
     /// No more jobs available in queue
@@ -156,7 +158,7 @@ enum Event {
     /// An error occurred loading the job from the database
     ErrorLoadingJob(Error),
     /// Test for waiting on dummy tasks
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test_components"))]
     Dummy,
 }
 
@@ -165,9 +167,10 @@ type TxJobPair = Option<(
     db::BackgroundJob,
 )>;
 
-impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
+// Methods which don't require `RefUnwindSafe`
+impl<Env: 'static> Runner<Env> {
     /// Build the builder for `Runner`
-    pub fn build(env: Env, executor: impl Spawn + 'static, conn: sqlx::PgPool) -> Builder<Env> {
+    pub fn builder(env: Env, executor: impl Spawn + 'static, conn: sqlx::PgPool) -> Builder<Env> {
         Builder::new(env, executor, conn)
     }
 
@@ -175,6 +178,13 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         let conn = self.pg_pool.acquire().await?;
         Ok(conn)
     }
+
+    pub fn connection_pool(&self) -> sqlx::PgPool {
+        self.pg_pool.clone()
+    }
+}
+
+impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
 
     /// Run all synchronous tasks
     /// Spawns synchronous tasks onto a rayon threadpool
@@ -210,43 +220,24 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
             }
 
             pending_messages += jobs_to_queue;
-            let timeout = timer::Delay::new(std::time::Duration::from_secs(self.timeout));
+            let timeout = timer::Delay::new(self.timeout);
             futures::select! {
                 msg = rx.next().fuse() => {
                     match msg {
                         Some(Event::Working) => {
-                            println!("Working!");
                             pending_messages -= 1
                         },
                         Some(Event::NoJobAvailable) => {
-                            println!("Nothing available");
                             return Ok(())
                         },
+                        Some(Event::ErrorLoadingJob(e)) => {
+                            return Err(e)
+                        }
                         None => return Err(CommError::NoMessage.into()),
-                        _ => todo!()
+                        _ => return Ok(())
                     }
                 },
                 _ = timeout.fuse() => return Err(CommError::Timeout.into())
-            };
-        }
-    }
-
-    /// Wait for tasks to finish based on timeout
-    /// this is mostly used for internal tests
-    #[cfg(test)]
-    async fn wait_for_all_tasks(&self, mut rx: channel::Receiver<Event>, pending: usize) {
-        let mut dummy_tasks = pending;
-        while dummy_tasks > 0 {
-            let timeout = timer::Delay::new(std::time::Duration::from_secs(self.timeout));
-            futures::select! {
-                msg = rx.next().fuse() => match msg {
-                    Some(Event::Working) => continue,
-                    Some(Event::NoJobAvailable) => break,
-                    Some(Event::Dummy) => dummy_tasks -= 1,
-                    None => panic!("Test Failed"),
-                    _ => panic!("Test Failed"),
-                },
-                _ = timeout.fuse() => panic!("Timed out"),
             };
         }
     }
@@ -416,6 +407,40 @@ fn try_to_extract_panic_info(info: &(dyn Any + Send + 'static)) -> PerformError 
         format!("job panicked: {}", x).into()
     } else {
         "job panicked".into()
+    }
+}
+
+#[cfg(any(test, feature = "test_components"))]
+impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
+
+    /// Wait for tasks to finish based on timeout
+    /// this is mostly used for internal tests
+    async fn wait_for_all_tasks(&self, mut rx: channel::Receiver<Event>, pending: usize) {
+        let mut dummy_tasks = pending;
+        while dummy_tasks > 0 {
+            let timeout = timer::Delay::new(self.timeout);
+            futures::select! {
+                msg = rx.next().fuse() => match msg {
+                    Some(Event::Working) => continue,
+                    Some(Event::NoJobAvailable) => break,
+                    Some(Event::Dummy) => dummy_tasks -= 1,
+                    None => panic!("Test Failed"),
+                    _ => panic!("Test Failed"),
+                },
+                _ = timeout.fuse() => panic!("Timed out"),
+            };
+        }
+    }
+
+    /// Check for any jobs that may have failed
+    pub async fn check_for_failed_jobs(&self, mut rx: channel::Receiver<Event>, pending: usize) -> Result<(), FailedJobsError> {
+        self.wait_for_all_tasks(rx, pending).await;
+        let num_failed = db::failed_job_count(&self.pg_pool).await?;
+        if num_failed == 0 {
+            Ok(())
+        } else {
+            Err(FailedJobsError::JobsFailed(num_failed))
+        }
     }
 }
 
