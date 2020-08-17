@@ -55,7 +55,6 @@ static INIT: Once = Once::new();
 pub fn initialize() {
     INIT.call_once(|| {
         let url = dotenv::var("DATABASE_URL").unwrap();
-        println!("Running migrations for {}", url);
         let mut conn = smol::block_on(sqlx::PgConnection::connect(url.as_str())).unwrap();
         smol::block_on(crate::migrate(&mut conn)).unwrap();
     });

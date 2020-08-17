@@ -62,12 +62,12 @@ fn resize_image_gen<E: Serialize + DeserializeOwned + Send + std::fmt::Display>(
 }
 
 #[test]
-fn enqueue_5_jobs_limited_size() {
+fn enqueue_8_jobs_limited_size() {
     initialize();
-    let (runner, rx) = TestGuard::runner((), 10);
+    let (runner, rx) = TestGuard::runner((), 8);
 
     let pool = runner.connection_pool();
-    smol::block_on(async move {
+    let res = smol::run(async {
         resize_image("tohru".to_string()).enqueue(&pool).await.unwrap();
         resize_image("gambit".to_string()).enqueue(&pool).await.unwrap();
         resize_image("chess".to_string()).enqueue(&pool).await.unwrap();
@@ -76,11 +76,9 @@ fn enqueue_5_jobs_limited_size() {
         resize_image("sinks".to_string()).enqueue(&pool).await.unwrap();
         resize_image("polkadotstingray".to_string()).enqueue(&pool).await.unwrap();
         resize_image("zutomayo".to_string()).enqueue(&pool).await.unwrap();
-        resize_image("zzz".to_string()).enqueue(&pool).await.unwrap();
-        resize_image("xix".to_string()).enqueue(&pool).await.unwrap();
         runner.run_all_sync_tasks().await.unwrap();
-        let res = runner.check_for_failed_jobs(rx, 10).await;
-        assert_matches!(coil::FailedJobsError::JobsFailed(0), res);
+        println!("Blocking on checking");
+        runner.check_for_failed_jobs(rx, 8).await.unwrap();
     });
 }
 
@@ -90,18 +88,17 @@ fn generic_jobs_can_be_enqueued() {
     let (tx, rx) = channel::bounded(5);
     let runner = TestGuard::builder(())
         .register_job::<resize_image_gen::Job<String>>()
-        .on_finish(move |_| { let _ = tx.send(coil::Event::Dummy); })
+        .on_finish(move |_| { smol::block_on(tx.send(coil::Event::Dummy)).unwrap(); })
         .build();
     let pool = runner.connection_pool();
 
-    smol::block_on(async move {
+    let res = smol::run(async {
         resize_image_gen("yuru".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("100gecs".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("papooz".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("kaguya".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("L".to_string()).enqueue(&pool).await.unwrap();
         runner.run_all_sync_tasks().await.unwrap();
-        let res = runner.check_for_failed_jobs(rx, 5).await;
-        assert_matches!(coil::FailedJobsError::JobsFailed(0), res);
+        runner.check_for_failed_jobs(rx, 5).await.unwrap();
     });
 }

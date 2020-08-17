@@ -4,7 +4,7 @@ use std::time::Duration;
 use coil::{Builder, Runner};
 use once_cell::sync::Lazy;
 use std::panic::RefUnwindSafe;
-
+use sqlx::Connection;
 // Since these tests deal with behavior concerning multiple connections
 // running concurrently, they have to run outside of a transaction.
 // Therefore we can't run more than one at a time.
@@ -20,12 +20,10 @@ pub struct TestGuard<'a, Env: 'static> {
 
 impl<'a, Env> TestGuard<'a, Env> {
     pub fn builder(env: Env) -> GuardBuilder<Env> {
-        let database_url =
-            dotenv::var("DATABASE_URL").expect("DATABASE_URL must be set to run tests");
 
         let pg_pool = smol::block_on(sqlx::postgres::PgPoolOptions::new()
-            .max_connections(16)
-            .connect(&database_url))
+            .max_connections(12)
+            .connect(&crate::DATABASE_URL))
             .unwrap();
 
         let builder = Runner::builder(env, crate::Executor, pg_pool);
@@ -37,7 +35,7 @@ impl<'a, Env> TestGuard<'a, Env> {
         let (tx, rx) = channel::bounded(tasks);
 
         (Self::builder(env)
-            .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)); })
+         .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)); })
          .build(),
          rx)
     }
@@ -109,13 +107,17 @@ impl<'a, Env> DerefMut for TestGuard<'a, Env> {
     }
 }
 
+// makes sure all Pg connections are closed and database is empty before running any other tests
 impl<'a, Env: 'static> Drop for TestGuard<'a, Env> {
     fn drop(&mut self) {
-        smol::block_on(async move {
+        smol::block_on(self.runner.connection_pool().close());
+        let mut conn = smol::block_on(sqlx::PgConnection::connect(&crate::DATABASE_URL)).unwrap();
+        smol::block_on(async {
             sqlx::query("TRUNCATE TABLE _background_tasks")
-                .execute(&mut self.runner.connection().await.unwrap())
+                .execute(&mut conn)
                 .await
                 .unwrap()
         });
+        smol::block_on(conn.close());
     }
 }

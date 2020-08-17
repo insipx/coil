@@ -49,7 +49,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
 
                 async #fn_token perform_async(self,
                     #env_pat: std::sync::Arc<Self::Environment>,
-                    #pool_pat: &mut sqlx::PgConnection
+                    #pool_pat: &sqlx::PgPool
                     ) #return_type
                 {
                     let Self { #(#arg_names_0),* } = self;
@@ -82,7 +82,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 const JOB_TYPE: &'static str = stringify!(#name);
                 const ASYNC: bool = #is_async;
 
-                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &mut sqlx::PgConnection) #return_type {
+                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &sqlx::PgPool) #return_type {
                     let Self { #(#arg_names_1),* } = self;
                     #body
                 }
@@ -115,7 +115,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
 
                 async #fn_token perform_async(self,
                     #env_pat: std::sync::Arc<Self::Environment>,
-                    #pool_pat: &mut sqlx::PgConnection
+                    #pool_pat: &sqlx::PgPool
                     ) #return_type
                 {
                     let Self { #(#arg_names_0),* } = self;
@@ -150,7 +150,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 const JOB_TYPE: &'static str = stringify!(#name);
                 const ASYNC: bool = #is_async;
 
-                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &mut sqlx::PgConnection) #return_type {
+                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &sqlx::PgPool) #return_type {
                     let Self { #(#arg_names_1),* } = self;
                     #body
                 }

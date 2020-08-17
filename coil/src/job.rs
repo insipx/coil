@@ -34,14 +34,14 @@ pub trait Job: Serialize + DeserializeOwned {
     
     /// Logic for running a synchronous job
     #[doc(hidden)] 
-    fn perform(self, _: &Self::Environment, _: &mut PgConnection) -> Result<(), PerformError> 
+    fn perform(self, _: &Self::Environment, _: &sqlx::PgPool) -> Result<(), PerformError>
     {
         Err(PerformError::WrongJob)
     }
     
     /// Logic for running an asynchronous job
     #[doc(hidden)] 
-    async fn perform_async(self, _: Arc<Self::Environment>, _: &mut PgConnection) -> Result<(), PerformError> {
+    async fn perform_async(self, _: Arc<Self::Environment>, _: &sqlx::PgPool) -> Result<(), PerformError> {
         Err(PerformError::WrongJob)
     }
 }

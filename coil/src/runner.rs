@@ -108,19 +108,13 @@ impl<Env: 'static> Builder<Env> {
         let threadpool = if let Some(t) = self.num_threads {
             rayon::ThreadPoolBuilder::new()
                 .num_threads(t)
-                .thread_name(|i| format!("bg-{}", i))
+                .thread_name(|i| format!("coil-{}", i))
         } else {
-            rayon::ThreadPoolBuilder::new().thread_name(|i| format!("bg-{}", i))
+            rayon::ThreadPoolBuilder::new().thread_name(|i| format!("coil-{}", i))
         };
-
         let threadpool = threadpool.build()?;
 
-        let max_tasks = if let Some(max) = self.max_tasks {
-            max
-        } else {
-            threadpool.current_num_threads()
-        };
-
+        let max_tasks = self.max_tasks.unwrap_or_else(|| threadpool.current_num_threads());
         let timeout = self.timeout.unwrap_or_else(|| std::time::Duration::from_secs(5));
         Ok(Runner {
             threadpool,
@@ -250,11 +244,10 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         let pg_pool = self.pg_pool.clone();
         self.get_single_async_job(tx, |job| {
             async move {
-                let mut conn = pg_pool.acquire().await?;
                 let perform_fn = registry
                     .get(&job.job_type)
                     .ok_or_else(|| PerformError::UnknownJob(job.job_type.to_string()))?;
-                perform_fn.perform_async(job.data, env, &mut *conn).await
+                perform_fn.perform_async(job.data, env, &pg_pool).await
             }
             .boxed()
         });
@@ -266,11 +259,10 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         let pg_pool = AssertUnwindSafe(self.pg_pool.clone());
 
         self.get_single_sync_job(tx, move |job| {
-            let mut conn = block_on(pg_pool.acquire())?;
             let perform_fn = registry
                 .get(&job.job_type)
                 .ok_or_else(|| PerformError::UnknownJob(job.job_type.to_string()))?;
-            perform_fn.perform_sync(job.data, &env, &mut *conn)
+            perform_fn.perform_sync(job.data, &env, &pg_pool)
         });
     }
 
@@ -421,16 +413,17 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     async fn wait_for_all_tasks(&self, mut rx: channel::Receiver<Event>, pending: usize) {
         let mut dummy_tasks = pending;
         while dummy_tasks > 0 {
+            println!("Remaining: {}", dummy_tasks);
             let timeout = timer::Delay::new(self.timeout);
             futures::select! {
                 msg = rx.next().fuse() => match msg {
-                    Some(Event::Working) => continue,
+                    // Some(Event::Working) => continue,
                     Some(Event::NoJobAvailable) => break,
                     Some(Event::Dummy) => dummy_tasks -= 1,
-                    None => panic!("Test Failed"),
-                    _ => panic!("Test Failed"),
+                    _ => (),
                 },
                 _ = timeout.fuse() => {
+                    println!("TIMED OUT");
                     break
                 },
             };

@@ -46,7 +46,7 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
     let barrier = Barrier::new(3);
     let (runner, task_wait) = TestGuard::runner(barrier.clone(), 2);
     let conn = runner.connection_pool();
-    smol::block_on(async move {
+    smol::block_on(async {
         barrier_job().enqueue(&conn).await?;
         barrier_job().enqueue(&conn).await
     })?;
@@ -58,7 +58,7 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
         let mut rx0 = rx.clone();
         let timeout = timer::Delay::new(Duration::from_millis(100));
 
-        let res = smol::block_on(async move {
+        let res = smol::block_on(async {
             futures::select! {
                 msg = rx0.next().fuse() => false,
                 _ = timeout.fuse() => true
@@ -86,12 +86,11 @@ fn check_for_failed_jobs_panics_if_jobs_failed() -> Result<()> {
     crate::initialize();
     let (runner, rx) = TestGuard::dummy_runner();
     let conn = runner.connection_pool();
-    smol::block_on(async move {
+    smol::block_on(async {
         failure_job().enqueue(&conn).await?;
         failure_job().enqueue(&conn).await?;
         failure_job().enqueue(&conn).await
     })?;
-
 
     smol::block_on(runner.run_all_sync_tasks())?;
     assert_eq!(Err(coil::FailedJobsError::JobsFailed(3)), smol::block_on(runner.check_for_failed_jobs(rx, 3)));
@@ -103,7 +102,7 @@ fn panicking_jobs_are_caught_and_treated_as_failures() -> Result<()> {
     crate::initialize();
     let (runner, rx) = TestGuard::dummy_runner();
     let conn = runner.connection_pool();
-    smol::block_on(async move {
+    smol::block_on(async {
         panic_job().enqueue(&conn).await?;
         failure_job().enqueue(&conn).await
     })?;
@@ -123,12 +122,13 @@ fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
     // The second job will never start.
     let runner = TestGuard::builder(barrier.clone())
         .num_threads(1)
+        .max_tasks(1)
         .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)); })
         .timeout(Duration::from_millis(50))
         .build();
 
     let conn = runner.connection_pool();
-    smol::block_on(async move {
+    smol::block_on(async {
         barrier_job().enqueue(&conn).await?;
         barrier_job().enqueue(&conn).await
     })?;
@@ -150,25 +150,25 @@ fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
     let mut runner = TestGuard::builder(())
         .num_threads(1)
         .max_tasks(1)
+        .timeout(std::time::Duration::from_secs(1))
         .on_finish(move |_| {
             smol::block_on(tx.send(coil::Event::Dummy)).unwrap();
         })
         .build();
+
     let mut conn = runner.connection_pool();
-    {
-        let conn0 = conn.clone();
-        smol::block_on(failure_job().enqueue(&conn0))?;
-        // Since jobs are loaded with `SELECT FOR UPDATE`, it will always fail in
-        // read-only mode
-        smol::block_on(sqlx::query("SET default_transaction_read_only = true").execute(&conn0))?;
-    }
+    smol::block_on(failure_job().enqueue(&conn))?;
+
+    // Since jobs are loaded with `SELECT FOR UPDATE`, it will always fail in
+    // read-only mode
+    smol::block_on(sqlx::query("SET default_transaction_read_only = true").execute(&conn))?;
 
     let run_result = smol::block_on(runner.run_all_sync_tasks());
-    {
-        smol::block_on(sqlx::query("SET default_transaction_read_only = false").execute(&conn))?;
-    }
+    smol::block_on(sqlx::query("SET default_transaction_read_only = false").execute(&conn))?;
     assert_matches!(run_result, Err(coil::FetchError::FailedLoadingJob(_)));
-    let res = smol::block_on(runner.check_for_failed_jobs(rx, 1)).unwrap();
+    // this one is supposed to time out because the job is never actually 'run'
+    // because we can't grab it due to read-only transaction
+    let _ = smol::block_on(runner.check_for_failed_jobs(rx, 1)).unwrap();
 
     Ok(())
 }
