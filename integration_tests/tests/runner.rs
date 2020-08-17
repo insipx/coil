@@ -1,9 +1,8 @@
 use assert_matches::assert_matches;
-use std::sync::mpsc::sync_channel;
-use anyhow::{Error, Result};
+use anyhow::Result;
 use std::thread;
 use std::time::Duration;
-use futures::{future::FutureExt, Future, StreamExt};
+use futures::{future::FutureExt, StreamExt};
 
 use crate::dummy_jobs::*;
 use crate::sync::Barrier;
@@ -13,7 +12,7 @@ use crate::test_guard::TestGuard;
 fn run_all_pending_jobs_returns_when_all_jobs_enqueued() -> Result<()> {
     crate::initialize();
     let barrier = Barrier::new(3);
-    let (runner, rx) = TestGuard::runner(barrier.clone(), 2);
+    let (runner, _wait_task) = TestGuard::runner(barrier.clone(), 2);
     let conn = runner.connection_pool();
 
     smol::block_on(async {
@@ -52,7 +51,7 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
     })?;
 
     smol::block_on(runner.run_all_sync_tasks())?;
-    let (tx, mut rx) = channel::bounded(2);
+    let (tx, rx) = channel::bounded(1);
 
     let handle = thread::spawn(move || {
         let mut rx0 = rx.clone();
@@ -147,7 +146,7 @@ fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
 fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
     crate::initialize();
     let (tx, rx) = channel::bounded(3);
-    let mut runner = TestGuard::builder(())
+    let runner = TestGuard::builder(())
         .num_threads(1)
         .max_tasks(1)
         .timeout(std::time::Duration::from_secs(1))
@@ -156,7 +155,7 @@ fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
         })
         .build();
 
-    let mut conn = runner.connection_pool();
+    let conn = runner.connection_pool();
     smol::block_on(failure_job().enqueue(&conn))?;
 
     // Since jobs are loaded with `SELECT FOR UPDATE`, it will always fail in

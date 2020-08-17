@@ -3,7 +3,6 @@ use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 use coil::{Builder, Runner};
 use once_cell::sync::Lazy;
-use std::panic::RefUnwindSafe;
 use sqlx::Connection;
 // Since these tests deal with behavior concerning multiple connections
 // running concurrently, they have to run outside of a transaction.
@@ -80,7 +79,7 @@ impl<Env> GuardBuilder<Env> {
 
     /// Set a timeout in seconds.
     /// This is the maximum amount of time we will wait until classifying a task as a failure and updating the retry counter.
-    pub fn timeout(mut self, timeout: std::time::Duration) -> Self {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         self.builder = self.builder.timeout(timeout);
         self
     }
@@ -118,6 +117,6 @@ impl<'a, Env: 'static> Drop for TestGuard<'a, Env> {
                 .await
                 .unwrap()
         });
-        smol::block_on(conn.close());
+        smol::block_on(conn.close()).unwrap();
     }
 }

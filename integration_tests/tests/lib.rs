@@ -9,7 +9,6 @@ use sqlx::Connection;
 use std::sync::Once;
 use once_cell::sync::Lazy;
 use crate::test_guard::TestGuard;
-use assert_matches::assert_matches;
 
 static DATABASE_URL: Lazy<String> = Lazy::new(|| {
     dotenv::var("DATABASE_URL").unwrap()
@@ -41,7 +40,7 @@ struct Size {
 }
 
 pub struct Environment {
-    conn: sqlx::PgPool,
+    _conn: sqlx::PgPool,
 }
 
 #[coil::background_job]
@@ -51,13 +50,12 @@ async fn resize_image_async(to_sleep: u64) -> Result<(), coil::PerformError> {
 }
 
 #[coil::background_job]
-fn resize_image(name: String) -> Result<(), coil::PerformError> {
-    println!("{}", name);
+fn resize_image(_name: String) -> Result<(), coil::PerformError> {
     Ok(())
 }
 
 #[coil::background_job]
-fn resize_image_gen<E: Serialize + DeserializeOwned + Send + std::fmt::Display>(some: E) -> Result<(), coil::PerformError> {
+fn resize_image_gen<E: Serialize + DeserializeOwned + Send + std::fmt::Display>(_some: E) -> Result<(), coil::PerformError> {
     Ok(())
 }
 
@@ -67,7 +65,7 @@ fn enqueue_8_jobs_limited_size() {
     let (runner, rx) = TestGuard::runner((), 8);
 
     let pool = runner.connection_pool();
-    let res = smol::run(async {
+    smol::run(async {
         resize_image("tohru".to_string()).enqueue(&pool).await.unwrap();
         resize_image("gambit".to_string()).enqueue(&pool).await.unwrap();
         resize_image("chess".to_string()).enqueue(&pool).await.unwrap();
@@ -92,7 +90,7 @@ fn generic_jobs_can_be_enqueued() {
         .build();
     let pool = runner.connection_pool();
 
-    let res = smol::run(async {
+    smol::run(async {
         resize_image_gen("yuru".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("100gecs".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("papooz".to_string()).enqueue(&pool).await.unwrap();
