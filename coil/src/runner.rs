@@ -178,8 +178,8 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
 
     /// Run all synchronous tasks
     /// Spawns synchronous tasks onto a rayon threadpool
-    pub fn run_all_sync_tasks(&self) -> Result<(), Error> {
-        block_on(self.run_pending_tasks(|tx| self.run_single_sync_job(tx)))
+    pub async fn run_all_sync_tasks(&self) -> Result<(), Error> {
+        self.run_pending_tasks(|tx| self.run_single_sync_job(tx)).await
     }
 
     /// Run all asynchronous tasks
@@ -271,8 +271,10 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     fn run_single_sync_job(&self, tx: Sender<Event>) -> Result<(), PerformError> {
         let env = Arc::clone(&self.environment);
         let registry = Arc::clone(&self.registry);
-        let mut conn = AssertUnwindSafe(block_on(self.pg_pool.acquire())?);
+        let pg_pool = AssertUnwindSafe(self.pg_pool.clone());
+        // let mut conn = AssertUnwindSafe(block_on(self.pg_pool.acquire())?);
         self.get_single_sync_job(tx, move |job| {
+            let mut conn = block_on(pg_pool.acquire())?;
             let perform_fn = registry
                 .get(&job.job_type)
                 .ok_or_else(|| PerformError::UnknownJob(job.job_type.to_string()))?;

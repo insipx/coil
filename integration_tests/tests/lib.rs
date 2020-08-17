@@ -132,7 +132,7 @@ fn enqueue_5_jobs_limited_size() {
             .max_tasks(3)
             .build()
             .unwrap();
-        runner.run_all_sync_tasks().unwrap();
+        runner.run_all_sync_tasks().await.unwrap();
     });
 }
 
@@ -156,9 +156,10 @@ fn enqueue_5_jobs_generic() {
             .build()
             .unwrap();
 
-        runner.run_all_sync_tasks().unwrap();
+        runner.run_all_sync_tasks().await.unwrap();
     });
 }
+
 /*
 #[test]
 fn enqueue_5_jobs_async() {
