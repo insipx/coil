@@ -25,7 +25,7 @@ pub enum Error {
     #[error(transparent)]
     Perform(#[from] PerformError),
     #[error(transparent)]
-    Communication(#[from] CommError),
+    Communication(#[from] FetchError),
     #[error("error getting connection to db {0}")]
     SQL(#[from] sqlx::Error),
     #[error("Couldn't spawn onto executor {0}")]
@@ -35,11 +35,13 @@ pub enum Error {
 }
 
 #[derive(Debug, Error)]
-pub enum CommError {
+pub enum FetchError {
     #[error("Got no response from worker")]
     NoMessage,
     #[error("Timeout reached while waiting for worker to finish")]
     Timeout,
+    #[error("Couldn't load job from storage {0}")]
+    FailedLoadingJob(#[from] sqlx::Error)
 }
 
 #[derive(Debug, Error)]
@@ -81,18 +83,11 @@ impl From<String> for PerformError {
 
 
 #[cfg(any(test, feature = "test_components"))]
-#[derive(Debug, Error)]
+#[derive(Debug, PartialEq)]
 pub enum FailedJobsError {
     /// Jobs that failed to run
-    #[error("Failed Jobs {0}")]
     JobsFailed(
         /// Number of failed jobs
         i64
     ),
-    #[error("Sql {0}")]
-    Sql(#[from] sqlx::Error),
-    #[error("{0}")]
-    Enq(#[from] EnqueueError),
-    #[error("{0}")]
-    Err(#[from] Error)
 }

@@ -121,7 +121,7 @@ impl<Env: 'static> Builder<Env> {
             threadpool.current_num_threads()
         };
 
-        let timeout = self.timeout.unwrap_or(std::time::Duration::from_secs(5));
+        let timeout = self.timeout.unwrap_or_else(|| std::time::Duration::from_secs(5));
         Ok(Runner {
             threadpool,
             executor: self.executor,
@@ -156,7 +156,7 @@ pub enum Event {
     /// No more jobs available in queue
     NoJobAvailable,
     /// An error occurred loading the job from the database
-    ErrorLoadingJob(Error),
+    ErrorLoadingJob(sqlx::Error),
     /// Test for waiting on dummy tasks
     #[cfg(any(test, feature = "test_components"))]
     Dummy,
@@ -188,21 +188,23 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
 
     /// Run all synchronous tasks
     /// Spawns synchronous tasks onto a rayon threadpool
-    pub async fn run_all_sync_tasks(&self) -> Result<(), Error> {
-        self.run_pending_tasks(|tx| self.run_single_sync_job(tx)).await
+    pub async fn run_all_sync_tasks(&self) -> Result<(), FetchError> {
+        self.run_pending_tasks(|tx| self.run_single_sync_job(tx)).await?;
+        Ok(())
     }
 
     /// Run all asynchronous tasks
     /// Spawns asynchronous tasks onto the specified executor
-    pub async fn run_all_async_tasks(&self) -> Result<(), Error> {
+    pub async fn run_all_async_tasks(&self) -> Result<(), FetchError> {
         self.run_pending_tasks(|tx| self.run_single_async_job(tx))
-            .await
+            .await?;
+        Ok(())
     }
 
     /// Runs all the pending tasks in a loop
-    async fn run_pending_tasks<F>(&self, fun: F) -> Result<(), Error>
+    async fn run_pending_tasks<F>(&self, fun: F) -> Result<(), FetchError>
     where
-        F: Fn(Sender<Event>) -> Result<(), PerformError>,
+        F: Fn(Sender<Event>)
     {
         let (tx, mut rx) = channel::bounded(self.max_tasks);
 
@@ -216,7 +218,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
             };
 
             for _ in 0..jobs_to_queue {
-                fun(tx.clone())?;
+                fun(tx.clone());
             }
 
             pending_messages += jobs_to_queue;
@@ -231,18 +233,18 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                             return Ok(())
                         },
                         Some(Event::ErrorLoadingJob(e)) => {
-                            return Err(e)
+                            return Err(FetchError::FailedLoadingJob(e))
                         }
-                        None => return Err(CommError::NoMessage.into()),
+                        None => return Err(FetchError::NoMessage.into()),
                         _ => return Ok(())
                     }
                 },
-                _ = timeout.fuse() => return Err(CommError::Timeout.into())
+                _ = timeout.fuse() => return Err(FetchError::Timeout.into())
             };
         }
     }
 
-    fn run_single_async_job(&self, tx: Sender<Event>) -> Result<(), PerformError> {
+    fn run_single_async_job(&self, tx: Sender<Event>) {
         let env = Arc::clone(&self.environment);
         let registry = Arc::clone(&self.registry);
         let pg_pool = self.pg_pool.clone();
@@ -255,15 +257,14 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 perform_fn.perform_async(job.data, env, &mut *conn).await
             }
             .boxed()
-        })?;
-        Ok(())
+        });
     }
 
-    fn run_single_sync_job(&self, tx: Sender<Event>) -> Result<(), PerformError> {
+    fn run_single_sync_job(&self, tx: Sender<Event>) {
         let env = Arc::clone(&self.environment);
         let registry = Arc::clone(&self.registry);
         let pg_pool = AssertUnwindSafe(self.pg_pool.clone());
-        // let mut conn = AssertUnwindSafe(block_on(self.pg_pool.acquire())?);
+
         self.get_single_sync_job(tx, move |job| {
             let mut conn = block_on(pg_pool.acquire())?;
             let perform_fn = registry
@@ -271,10 +272,9 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 .ok_or_else(|| PerformError::UnknownJob(job.job_type.to_string()))?;
             perform_fn.perform_sync(job.data, &env, &mut *conn)
         });
-        Ok(())
     }
 
-    fn get_single_async_job<F>(&self, tx: Sender<Event>, fun: F) -> Result<(), PerformError>
+    fn get_single_async_job<F>(&self, tx: Sender<Event>, fun: F)
     where
         F: FnOnce(
                 db::BackgroundJob,
@@ -284,7 +284,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     {
         let pg_pool = self.pg_pool.clone();
         let finish_hook = self.on_finish.clone();
-        self.executor.spawn(async move {
+        let _ = self.executor.spawn(async move {
             let run = || -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>> {
                 async move {
                     let (transaction, job) =
@@ -303,15 +303,12 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 .boxed()
             };
             match run().await {
-                Ok(_) => {
-                    println!("Job ran succesfully");
-                }
+                Ok(_) => {}
                 Err(e) => {
-                    eprintln!("{:?}", e);
+                    panic!("failed to update job {:?}", e);
                 }
             };
-        })?;
-        Ok(())
+        });
     }
 
     fn get_single_sync_job<F>(&self, tx: Sender<Event>, fun: F)
@@ -328,7 +325,6 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     } else {
                         return Ok(());
                     };
-
                 let job_id = job.id;
                 let result = catch_unwind(|| fun(job))
                     .map_err(|e| try_to_extract_panic_info(&e))
@@ -336,7 +332,13 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 block_on(Self::finish_work(result, transaction, job_id, finish_hook));
                 Ok(())
             };
-            res().unwrap()
+
+            match res() {
+                Ok(_) => {},
+                Err(e) => {
+                    panic!("Failed to update job: {:?}", e);
+                }
+            }
         });
     }
 
@@ -345,10 +347,11 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         let mut transaction = match pg_pool.begin().await {
             Ok(t) => t,
             Err(e) => {
-                let _ = tx.send(Event::ErrorLoadingJob(e.into())).await;
+                let _ = tx.send(Event::ErrorLoadingJob(e)).await;
                 return None;
             }
         };
+
         let job = match db::find_next_unlocked_job(&mut transaction, Some(is_async)).await {
             Ok(Some(j)) => {
                 let _ = tx.send(Event::Working).await;
@@ -359,7 +362,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 return None;
             }
             Err(e) => {
-                let _ = tx.send(Event::ErrorLoadingJob(e.into())).await;
+                let _ = tx.send(Event::ErrorLoadingJob(e)).await;
                 return None;
             }
         };
@@ -427,15 +430,15 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     None => panic!("Test Failed"),
                     _ => panic!("Test Failed"),
                 },
-                _ = timeout.fuse() => panic!("Timed out"),
+                _ = timeout.fuse() => break,
             };
         }
     }
 
     /// Check for any jobs that may have failed
-    pub async fn check_for_failed_jobs(&self, mut rx: channel::Receiver<Event>, pending: usize) -> Result<(), FailedJobsError> {
+    pub async fn check_for_failed_jobs(&self, rx: channel::Receiver<Event>, pending: usize) -> Result<(), FailedJobsError> {
         self.wait_for_all_tasks(rx, pending).await;
-        let num_failed = db::failed_job_count(&self.pg_pool).await?;
+        let num_failed = db::failed_job_count(&self.pg_pool).await.unwrap();
         if num_failed == 0 {
             Ok(())
         } else {

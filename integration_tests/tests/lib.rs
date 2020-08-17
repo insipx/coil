@@ -8,6 +8,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sqlx::Connection;
 use std::sync::Once;
 use once_cell::sync::Lazy;
+use crate::test_guard::TestGuard;
 
 static DATABASE_URL: Lazy<String> = Lazy::new(|| {
     dotenv::var("DATABASE_URL").unwrap()
@@ -66,7 +67,7 @@ fn enqueue_5_jobs_limited_size() {
     let pool = smol::block_on(sqlx::PgPool::connect(&DATABASE_URL))
     .unwrap();
 
-    smol::run(async move {
+    smol::block_on(async move {
         resize_image("tohru".to_string()).enqueue(&pool).await.unwrap();
         resize_image("gambit".to_string()).enqueue(&pool).await.unwrap();
         resize_image("chess".to_string()).enqueue(&pool).await.unwrap();
@@ -78,11 +79,10 @@ fn enqueue_5_jobs_limited_size() {
         resize_image("zzz".to_string()).enqueue(&pool).await.unwrap();
         resize_image("xix".to_string()).enqueue(&pool).await.unwrap();
 
-        let runner = coil::Builder::new((), Executor, pool)
+        let runner = TestGuard::builder(())
             .num_threads(8)
             .max_tasks(3)
-            .build()
-            .unwrap();
+            .build();
         runner.run_all_sync_tasks().await.unwrap();
     });
 }
@@ -93,19 +93,18 @@ fn enqueue_5_jobs_generic() {
     let pool = smol::block_on(sqlx::PgPool::connect(&DATABASE_URL))
     .unwrap();
 
-    smol::run(async move {
+    smol::block_on(async move {
         resize_image_gen("yuru".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("100gecs".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("papooz".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("kaguya".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("L".to_string()).enqueue(&pool).await.unwrap();
 
-        let runner = coil::Builder::new((), Executor, pool)
+        let runner = TestGuard::builder(())
             .num_threads(8)
-            .max_tasks(3)
+            .max_tasks(10)
             .register_job::<resize_image_gen::Job<String>>()
-            .build()
-            .unwrap();
+            .build();
 
         runner.run_all_sync_tasks().await.unwrap();
     });

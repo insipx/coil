@@ -22,9 +22,9 @@ impl<'a, Env> TestGuard<'a, Env> {
     pub fn builder(env: Env) -> GuardBuilder<Env> {
         let database_url =
             dotenv::var("DATABASE_URL").expect("DATABASE_URL must be set to run tests");
-        let pg_pool = sqlx::postgres::PgPoolOptions::new()
+        let pg_pool = smol::block_on(sqlx::postgres::PgPoolOptions::new()
             .max_connections(16)
-            .connect_lazy(&database_url)
+            .connect(&database_url))
             .unwrap();
         let builder = Runner::builder(env, crate::Executor, pg_pool);
 
@@ -37,8 +37,12 @@ impl<'a, Env> TestGuard<'a, Env> {
 }
 
 impl<'a> TestGuard<'a, ()> {
-    pub fn dummy_runner() -> Self {
-        Self::builder(()).build()
+    pub fn dummy_runner() -> (Self, channel::Receiver<coil::Event>) {
+        let (tx, rx) = channel::unbounded();
+        (Self::builder(())
+         .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)); })
+         .build(),
+         rx)
     }
 }
 

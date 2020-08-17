@@ -70,7 +70,7 @@ pub async fn enqueue_job<T: Job>(
 pub async fn find_next_unlocked_job(
     conn: impl Executor<'_, Database = Postgres>,
     is_async: Option<bool>,
-) -> Result<Option<BackgroundJob>, EnqueueError> {
+) -> Result<Option<BackgroundJob>, sqlx::Error> {
     if let Some(a) = is_async {
         sqlx::query_as::<_, BackgroundJob>(
             "SELECT id, job_type, data, is_async
@@ -97,7 +97,7 @@ pub async fn find_next_unlocked_job(
 pub async fn delete_successful_job(
     conn: impl Executor<'_, Database = Postgres>,
     id: i64,
-) -> Result<(), EnqueueError> {
+) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM _background_tasks WHERE id=$1")
         .bind(id)
         .execute(conn)
@@ -127,7 +127,8 @@ pub async fn unlocked_tasks_count(conn: impl Executor<'_, Database = Postgres>, 
 }
 */
 /// Gets jobs which failed
-pub async fn failed_job_count(conn: impl Executor<'_, Database = Postgres>) -> Result<i64, EnqueueError> {
+#[cfg(any(test, feature = "test_components"))]
+pub async fn failed_job_count(conn: impl Executor<'_, Database = Postgres>) -> Result<i64, sqlx::Error> {
     let count = sqlx::query_as::<_, (i64, )>("SELECT COUNT(*) FROM _background_tasks WHERE retries > 0")
         .fetch_one(conn)
         .await?;
