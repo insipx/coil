@@ -3,72 +3,83 @@ use std::sync::mpsc::sync_channel;
 use anyhow::{Error, Result};
 use std::thread;
 use std::time::Duration;
-// use coil::FailedJobsError;
+use futures::{future::FutureExt, Future, StreamExt};
 
 use crate::dummy_jobs::*;
 use crate::sync::Barrier;
 use crate::test_guard::TestGuard;
-/*
+
 #[test]
 fn run_all_pending_jobs_returns_when_all_jobs_enqueued() -> Result<()> {
+    crate::initialize();
     let barrier = Barrier::new(3);
-    let runner = TestGuard::runner(barrier.clone());
-    smol::block_on(async move {
-        let conn = runner.connection().await?;
-        barrier_job().enqueue(&conn).await?;
-        barrier_job().enqueue(&conn).await?;
+    let (runner, rx) = TestGuard::runner(barrier.clone(), 2);
+    let conn = runner.connection_pool();
 
-        smol::block_on(runner.run_all_sync_tasks())?;
+    smol::block_on(async {
+        barrier_job().enqueue(&conn).await.unwrap();
+        barrier_job().enqueue(&conn).await.unwrap();
+        runner.run_all_sync_tasks().await.unwrap();
 
-        let queued_job_count = background_jobs::table.count().get_result(&conn);
-        let unlocked_job_count = background_jobs::table
-            .select(background_jobs::id)
-            .for_update()
-            .skip_locked()
-            .load::<i64>(&conn)
-            .map(|v| v.len());
+        let queued_job_count = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM _background_tasks")
+            .fetch_one(&conn)
+            .await.unwrap()
+            .0;
+        let unlocked_job_count = sqlx::query_as::<_, (i64,)>("SELECT id FROM _background_tasks FOR UPDATE SKIP LOCKED")
+            .fetch_all(&conn)
+            .await
+            .unwrap()
+            .len();
 
-        assert_eq!(Ok(2), queued_job_count);
-        assert_eq!(Ok(0), unlocked_job_count);
+        assert_eq!(2, queued_job_count);
+        assert_eq!(0, unlocked_job_count);
     });
-
 
     barrier.wait();
     Ok(())
 }
- */
-/*
+
+
 #[test]
 fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<()> {
+    crate::initialize();
     let barrier = Barrier::new(3);
-    let runner = TestGuard::runner(barrier.clone());
+    let (runner, task_wait) = TestGuard::runner(barrier.clone(), 2);
     let conn = runner.connection_pool();
     smol::block_on(async move {
-        barrier_job().enqueue(&conn)?;
-        barrier_job().enqueue(&conn)
+        barrier_job().enqueue(&conn).await?;
+        barrier_job().enqueue(&conn).await
     })?;
 
     smol::block_on(runner.run_all_sync_tasks())?;
+    let (tx, mut rx) = channel::bounded(2);
 
-    let (send, recv) = sync_channel(0);
     let handle = thread::spawn(move || {
-        let wait = Duration::from_millis(100);
+        let mut rx0 = rx.clone();
+        let timeout = timer::Delay::new(Duration::from_millis(100));
+
+        let res = smol::block_on(async move {
+            futures::select! {
+                msg = rx0.next().fuse() => false,
+                _ = timeout.fuse() => true
+            }
+        });
         assert!(
-            recv.recv_timeout(wait).is_err(),
+            res,
             "wait_for_jobs returned before jobs finished"
         );
 
         barrier.wait();
 
-        assert!(recv.recv().is_ok(), "wait_for_jobs didn't return");
+        assert!(smol::block_on(rx.recv()).is_ok(), "wait_for_jobs didn't return");
     });
 
-    runner.check_for_failed_jobs()?;
-    send.send(1)?;
+    let _ = smol::block_on(runner.check_for_failed_jobs(task_wait, 2));
+    smol::block_on(tx.send(()))?;
     handle.join().unwrap();
     Ok(())
 }
- */
+
 
 #[test]
 fn check_for_failed_jobs_panics_if_jobs_failed() -> Result<()> {

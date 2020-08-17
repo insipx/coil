@@ -9,6 +9,7 @@ use sqlx::Connection;
 use std::sync::Once;
 use once_cell::sync::Lazy;
 use crate::test_guard::TestGuard;
+use assert_matches::assert_matches;
 
 static DATABASE_URL: Lazy<String> = Lazy::new(|| {
     dotenv::var("DATABASE_URL").unwrap()
@@ -57,16 +58,15 @@ fn resize_image(name: String) -> Result<(), coil::PerformError> {
 
 #[coil::background_job]
 fn resize_image_gen<E: Serialize + DeserializeOwned + Send + std::fmt::Display>(some: E) -> Result<(), coil::PerformError> {
-    println!("{}", some);
     Ok(())
 }
 
 #[test]
 fn enqueue_5_jobs_limited_size() {
     initialize();
-    let pool = smol::block_on(sqlx::PgPool::connect(&DATABASE_URL))
-    .unwrap();
+    let (runner, rx) = TestGuard::runner((), 10);
 
+    let pool = runner.connection_pool();
     smol::block_on(async move {
         resize_image("tohru".to_string()).enqueue(&pool).await.unwrap();
         resize_image("gambit".to_string()).enqueue(&pool).await.unwrap();
@@ -78,20 +78,21 @@ fn enqueue_5_jobs_limited_size() {
         resize_image("zutomayo".to_string()).enqueue(&pool).await.unwrap();
         resize_image("zzz".to_string()).enqueue(&pool).await.unwrap();
         resize_image("xix".to_string()).enqueue(&pool).await.unwrap();
-
-        let runner = TestGuard::builder(())
-            .num_threads(8)
-            .max_tasks(3)
-            .build();
         runner.run_all_sync_tasks().await.unwrap();
+        let res = runner.check_for_failed_jobs(rx, 10).await;
+        assert_matches!(coil::FailedJobsError::JobsFailed(0), res);
     });
 }
 
 #[test]
-fn enqueue_5_jobs_generic() {
+fn generic_jobs_can_be_enqueued() {
     initialize();
-    let pool = smol::block_on(sqlx::PgPool::connect(&DATABASE_URL))
-    .unwrap();
+    let (tx, rx) = channel::bounded(5);
+    let runner = TestGuard::builder(())
+        .register_job::<resize_image_gen::Job<String>>()
+        .on_finish(move |_| { let _ = tx.send(coil::Event::Dummy); })
+        .build();
+    let pool = runner.connection_pool();
 
     smol::block_on(async move {
         resize_image_gen("yuru".to_string()).enqueue(&pool).await.unwrap();
@@ -99,13 +100,8 @@ fn enqueue_5_jobs_generic() {
         resize_image_gen("papooz".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("kaguya".to_string()).enqueue(&pool).await.unwrap();
         resize_image_gen("L".to_string()).enqueue(&pool).await.unwrap();
-
-        let runner = TestGuard::builder(())
-            .num_threads(8)
-            .max_tasks(10)
-            .register_job::<resize_image_gen::Job<String>>()
-            .build();
-
         runner.run_all_sync_tasks().await.unwrap();
+        let res = runner.check_for_failed_jobs(rx, 5).await;
+        assert_matches!(coil::FailedJobsError::JobsFailed(0), res);
     });
 }

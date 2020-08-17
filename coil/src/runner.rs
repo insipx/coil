@@ -430,7 +430,9 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     None => panic!("Test Failed"),
                     _ => panic!("Test Failed"),
                 },
-                _ = timeout.fuse() => break,
+                _ = timeout.fuse() => {
+                    break
+                },
             };
         }
     }

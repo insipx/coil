@@ -22,17 +22,24 @@ impl<'a, Env> TestGuard<'a, Env> {
     pub fn builder(env: Env) -> GuardBuilder<Env> {
         let database_url =
             dotenv::var("DATABASE_URL").expect("DATABASE_URL must be set to run tests");
+
         let pg_pool = smol::block_on(sqlx::postgres::PgPoolOptions::new()
             .max_connections(16)
             .connect(&database_url))
             .unwrap();
+
         let builder = Runner::builder(env, crate::Executor, pg_pool);
 
         GuardBuilder { builder }
     }
 
-    pub fn runner(env: Env) -> Self {
-        Self::builder(env).build()
+    pub fn runner(env: Env, tasks: usize) -> (Self, channel::Receiver<coil::Event>) {
+        let (tx, rx) = channel::bounded(tasks);
+
+        (Self::builder(env)
+            .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)); })
+         .build(),
+         rx)
     }
 }
 

@@ -21,6 +21,7 @@ assert_matches = "1.3.0"
 anyhow = "1.0.32"
 antidote = "1.0.0"
 channel = { version = "1.4.0", package = "async-channel" }
+timer = { version = "3.0", package = "futures-timer" }
 
 [[test]]
 name = "integration_tests"
