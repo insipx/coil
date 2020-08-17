@@ -37,14 +37,11 @@ pub struct Registry<Env> {
 impl<Env: 'static> Registry<Env> {
     
     pub fn register_job<T: Job + 'static + Send>(&mut self) {
-        println!("Registering job {}", T::JOB_TYPE);
-        println!("{:?} : {:?}", TypeId::of::<T::Environment>(), TypeId::of::<Env>());
         if  TypeId::of::<T::Environment>() == TypeId::of::<Env>() {
             self.jobs.insert(T::JOB_TYPE, JobVTable::from_job::<T>());
         } else {
             log::warn!("could not register job");
         }
-        println!("Registered");
     }
 
     /// Loads the registry from all invocations of [`register_job!`] for this
@@ -88,6 +85,7 @@ enum SyncOrAsync {
     Sync {
         fun: fn(Vec<u8>, &dyn Any, &mut PgConnection) -> Result<(), PerformError>
     },
+    #[allow(clippy::type_complexity)]
     Async {
         fun: for<'a> fn(Vec<u8>, Arc<(dyn Any + Send + Sync)>, &'a mut PgConnection) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>
     }
@@ -114,7 +112,6 @@ impl JobVTable {
                 fun: perform_sync_job::<T>,
             }
         };
-        println!("Type Id: {:?}", TypeId::of::<T::Environment>());
         Self {
             env_type: TypeId::of::<T::Environment>(),
             job_type: T::JOB_TYPE,
@@ -169,10 +166,6 @@ pub struct PerformJob<Env> {
 
 impl<Env: 'static + Send + Sync> PerformJob<Env> {
     
-    pub fn is_async(&self) -> bool {
-        matches!(self.vtable.perform, SyncOrAsync::Async { .. })
-    }
-
     /// Perform a job in a synchronous way.
     ///
     /// # Blocks

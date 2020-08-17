@@ -35,13 +35,12 @@ pub struct Environment {
     conn: sqlx::PgPool,
 }
 
-/*
 #[coil::background_job]
-fn resize_image_sync(file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
-    println!("Hello");
+async fn resize_image_async(to_sleep: u64) -> Result<(), coil::PerformError> {
+    smol::Timer::new(std::time::Duration::from_millis(to_sleep)).await;
     Ok(())
 }
-*/
+
 /*
 #[coil::background_job]
 async fn resize_image(file_name: String, dimensions: Size) -> Result<(), coil::PerformError> {
@@ -122,18 +121,10 @@ fn enqueue_5_jobs_limited_size() {
         resize_image("chess".to_string()).enqueue(&pool).await.unwrap();
         resize_image("kaguya".to_string()).enqueue(&pool).await.unwrap();
         resize_image("L".to_string()).enqueue(&pool).await.unwrap();
-
         resize_image("sinks".to_string()).enqueue(&pool).await.unwrap();
-
-        resize_image("polkadotstingray".to_string())
-            .enqueue(&pool)
-            .await
-            .unwrap();
-
+        resize_image("polkadotstingray".to_string()).enqueue(&pool).await.unwrap();
         resize_image("zutomayo".to_string()).enqueue(&pool).await.unwrap();
-
         resize_image("zzz".to_string()).enqueue(&pool).await.unwrap();
-
         resize_image("xix".to_string()).enqueue(&pool).await.unwrap();
 
         let runner = coil::RunnerBuilder::new((), Executor, pool)
@@ -141,8 +132,7 @@ fn enqueue_5_jobs_limited_size() {
             .max_tasks(3)
             .build()
             .unwrap();
-        runner.run_all_pending_tasks().await.unwrap();
-        println!("Finished");
+        runner.run_all_sync_tasks().unwrap();
     });
 }
 
@@ -166,7 +156,32 @@ fn enqueue_5_jobs_generic() {
             .build()
             .unwrap();
 
-        runner.run_all_pending_tasks().await.unwrap();
-        println!("Finished");
+        runner.run_all_sync_tasks().unwrap();
     });
 }
+/*
+#[test]
+fn enqueue_5_jobs_async() {
+    initialize();
+
+    smol::run(async move {
+        let pool = sqlx::PgPool::connect(&DATABASE_URL).await.unwrap();
+        resize_image_async(2000).enqueue(&pool).await.unwrap();
+        resize_image_async(500).enqueue(&pool).await.unwrap();
+        resize_image_async(100).enqueue(&pool).await.unwrap();
+        resize_image_async(1500).enqueue(&pool).await.unwrap();
+        resize_image_async(250).enqueue(&pool).await.unwrap();
+
+        let time = std::time::Instant::now();
+        let runner = coil::RunnerBuilder::new((), Executor, pool)
+            .num_threads(8)
+            .max_tasks(10)
+            .build()
+            .unwrap();
+        runner.run_all_async_tasks().await.unwrap();
+        let elapsed = time.elapsed();
+        println!("Took {:?}", elapsed);
+        assert!(elapsed.as_secs() < 10);
+    });
+}
+*/

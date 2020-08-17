@@ -16,8 +16,8 @@
 
 //! Database Operations for getting and deleting jobs
 
-use crate::job::Job;
 use crate::error::{EnqueueError, Error, PerformError};
+use crate::job::Job;
 use sqlx::prelude::*;
 use sqlx::Postgres;
 
@@ -42,14 +42,20 @@ pub struct BackgroundJob {
 ///  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 /// );
 /// ```
-pub async fn migrate(pool: impl Acquire<'_, Database=Postgres>) -> Result<(), Error> {
-    sqlx::migrate!("./migrations").run(pool).await.map_err(Into::into)
+pub async fn migrate(pool: impl Acquire<'_, Database = Postgres>) -> Result<(), Error> {
+    sqlx::migrate!("./migrations")
+        .run(pool)
+        .await
+        .map_err(Into::into)
 }
 
-pub async fn enqueue_job<T: Job>(conn: impl Executor<'_, Database=Postgres>, job: T) -> Result<(), EnqueueError> {
+pub async fn enqueue_job<T: Job>(
+    conn: impl Executor<'_, Database = Postgres>,
+    job: T,
+) -> Result<(), EnqueueError> {
     let data = rmp_serde::encode::to_vec(&job)?;
-    sqlx::query("INSERT INTO _background_tasks (job_type, data, is_async) VALUES ($1, $2, $3)") 
-        .bind(T::JOB_TYPE) 
+    sqlx::query("INSERT INTO _background_tasks (job_type, data, is_async) VALUES ($1, $2, $3)")
+        .bind(T::JOB_TYPE)
         .bind(data)
         .bind(T::ASYNC)
         .execute(conn)
@@ -57,25 +63,41 @@ pub async fn enqueue_job<T: Job>(conn: impl Executor<'_, Database=Postgres>, job
     Ok(())
 }
 
-/// Get the next unlocked job. 
+/// Get the next unlocked job.
 /// Optionally pass a boolean to specify whether to get the next unlocked synchronous or
-/// asynchronous job. 
+/// asynchronous job.
 /// Passing `None` gets the next unlocked job regardless of whether it is async or sync.
-pub async fn find_next_unlocked_job(conn: impl Executor<'_, Database=Postgres>, is_async: Option<bool>)  -> Result<Option<BackgroundJob>, EnqueueError> {
+pub async fn find_next_unlocked_job(
+    conn: impl Executor<'_, Database = Postgres>,
+    is_async: Option<bool>,
+) -> Result<Option<BackgroundJob>, EnqueueError> {
     if let Some(a) = is_async {
-        match a {
-            true => sqlx::query_as::<_, BackgroundJob>("SELECT id, job_type, data, is_async FROM _background_tasks WHERE is_async = true ORDER BY id FOR UPDATE SKIP LOCKED").fetch_optional(conn).await.map_err(Into::into),
-            false => sqlx::query_as::<_, BackgroundJob>("SELECT id, job_type, data, is_async FROM _background_tasks WHERE is_async = false ORDER BY id FOR UPDATE SKIP LOCKED").fetch_optional(conn).await.map_err(Into::into),
-        }
+        sqlx::query_as::<_, BackgroundJob>(
+            "SELECT id, job_type, data, is_async
+            FROM _background_tasks
+            WHERE is_async = $1
+            ORDER BY id FOR UPDATE SKIP LOCKED",
+        )
+            .bind(a)
+            .fetch_optional(conn)
+            .await
+            .map_err(Into::into)
     } else {
-        sqlx::query_as::<_, BackgroundJob>("SELECT id, job_type, data, is_async FROM _background_tasks ORDER BY id FOR UPDATE SKIP LOCKED")
+        sqlx::query_as::<_, BackgroundJob>(
+            "SELECT id, job_type, data, is_async
+             FROM _background_tasks
+             ORDER BY id FOR UPDATE SKIP LOCKED"
+        )
             .fetch_optional(conn)
             .await
             .map_err(Into::into)
     }
 }
 
-pub async fn delete_successful_job(conn: impl Executor<'_, Database=Postgres>, id: i64) -> Result<(), EnqueueError> {
+pub async fn delete_successful_job(
+    conn: impl Executor<'_, Database = Postgres>,
+    id: i64,
+) -> Result<(), EnqueueError> {
     sqlx::query("DELETE FROM _background_tasks WHERE id=$1")
         .bind(id)
         .execute(conn)
@@ -83,11 +105,23 @@ pub async fn delete_successful_job(conn: impl Executor<'_, Database=Postgres>, i
     Ok(())
 }
 
-pub async fn update_failed_job(conn: impl Executor<'_, Database=Postgres>, id: i64) -> Result<(), PerformError> {
-    sqlx::query("UPDATE _background_tasks SET retries = retries + 1, last_retry = NOW() WHERE id = $1")
-        .bind(id)
-        .execute(conn)
-        .await?;
+pub async fn update_failed_job(
+    conn: impl Executor<'_, Database = Postgres>,
+    id: i64,
+) -> Result<(), PerformError> {
+    sqlx::query(
+        "UPDATE _background_tasks SET retries = retries + 1, last_retry = NOW() WHERE id = $1",
+    )
+    .bind(id)
+    .execute(conn)
+    .await?;
     Ok(())
+}
 
+pub async fn unlocked_tasks_count(conn: impl Executor<'_, Database = Postgres>, is_async: bool) -> Result<i64, EnqueueError> {
+    let count = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM _background_tasks WHERE is_async = $1")
+        .bind(is_async)
+        .fetch_one(conn)
+        .await?;
+    Ok(count.0)
 }

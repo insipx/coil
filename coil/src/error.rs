@@ -38,6 +38,8 @@ pub enum Error {
 pub enum CommError {
     #[error("Got no response from worker")]
     NoMessage,
+    #[error("Timeout reached while waiting for worker to finish")]
+    Timeout,
 }
 
 #[derive(Debug, Error)]

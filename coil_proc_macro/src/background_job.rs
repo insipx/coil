@@ -27,7 +27,12 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
     let (impl_generics, ty_generics, where_clause) = job.generics.split_for_impl();
     let is_async = job.is_async;
 
-    let res = if job.generics_exist {
+    // FIXME: this proc-macro needs some love ...
+    // I should probably split the `Job Trait` into `Async Job` and `Sync Job`
+    // Or leave the Job trait as it is and create two proc macros, one for async and one for sync
+    // this if-else chain is ugly.
+    // Or maybe there is a better way to accomplish this with proc-macros...
+    let res = if job.generics_exist && job.is_async {
         quote! {
             #(#attrs)*
             #vis #fn_token #name #impl_generics (#(#fn_args),*) -> #name :: Job #ty_generics #where_clause {
@@ -50,6 +55,32 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                     let Self { #(#arg_names_0),* } = self;
                     #body
                 }
+            }
+
+            mod #name {
+                use super::*;
+
+                #[derive(coil::Serialize, coil::Deserialize)]
+                #[serde(crate = "coil::serde")]
+                pub struct Job #ty_generics #where_clause {
+                    #(#struct_def),*
+                }
+            }
+        }
+    } else if job.generics_exist && !job.is_async {
+        quote! {
+            #(#attrs)*
+            #vis #fn_token #name #impl_generics (#(#fn_args),*) -> #name :: Job #ty_generics #where_clause {
+                #name :: Job {
+                    #(#struct_assign),*
+                }
+            }
+
+            #[coil::async_trait::async_trait]
+            impl #impl_generics coil::Job for #name :: Job #ty_generics #where_clause {
+                type Environment = #env_type;
+                const JOB_TYPE: &'static str = stringify!(#name);
+                const ASYNC: bool = #is_async;
 
                 #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &mut sqlx::PgConnection) #return_type {
                     let Self { #(#arg_names_1),* } = self;
@@ -67,7 +98,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 }
             }
         }
-    } else {
+    } else if !job.generics_exist && job.is_async {
         quote! {
             #(#attrs)*
             #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
@@ -90,6 +121,34 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                     let Self { #(#arg_names_0),* } = self;
                     #body
                 }
+            }
+
+            mod #name {
+                use super::*;
+
+                #[derive(coil::Serialize, coil::Deserialize)]
+                #[serde(crate = "coil::serde")]
+                pub struct Job {
+                    #(#struct_def),*
+                }
+
+                coil::register_job!(Job);
+            }
+        }
+    } else {
+        quote! {
+            #(#attrs)*
+            #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
+                #name :: Job {
+                    #(#struct_assign),*
+                }
+            }
+
+            #[coil::async_trait::async_trait]
+            impl coil::Job for #name :: Job {
+                type Environment = #env_type;
+                const JOB_TYPE: &'static str = stringify!(#name);
+                const ASYNC: bool = #is_async;
 
                 #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &mut sqlx::PgConnection) #return_type {
                     let Self { #(#arg_names_1),* } = self;
@@ -110,6 +169,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
             }
         }
     };
+
     Ok(res)
 }
 
@@ -149,7 +209,7 @@ impl BackgroundJob {
                 .error("#[coil::background_job] cannot be used on unsafe functions"));
         }
 
-        if let Some(_) = sig.asyncness {
+        if sig.asyncness.is_some() {
             is_async = true;
         }
 
