@@ -489,9 +489,9 @@ mod tests {
         let database_url =
             dotenv::var("DATABASE_URL").expect("DATABASE_URL must be set to run tests");
         let pool = smol::block_on(sqlx::PgPool::connect(database_url.as_str())).unwrap();
-        crate::Runner::build((), Executor, pool)
+        crate::Runner::builder((), Executor, pool)
             .num_threads(2)
-            .timeout(5)
+            .timeout(std::time::Duration::from_secs(5))
             .build()
             .unwrap()
     }
@@ -558,8 +558,7 @@ mod tests {
                         Ok(())
                     }
                     .boxed()
-                })
-                .unwrap();
+                });
 
             fetch_barrier2.0.wait();
             runner
@@ -570,8 +569,7 @@ mod tests {
                         Ok(())
                     }
                     .boxed()
-                })
-                .unwrap();
+                });
             runner.wait_for_all_tasks(rx, 2).await;
         });
     }
@@ -627,8 +625,7 @@ mod tests {
         smol::run(async move {
             let mut conn = runner.connection().await.unwrap();
             runner
-                .get_single_async_job(tx.clone(), move |_| async move { Ok(()) }.boxed())
-                .unwrap();
+                .get_single_async_job(tx.clone(), move |_| async move { Ok(()) }.boxed());
             runner.wait_for_all_tasks(rx, 1).await;
             let remaining_jobs = get_job_count(&mut conn).await;
             assert_eq!(0, remaining_jobs);
