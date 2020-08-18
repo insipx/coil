@@ -32,6 +32,7 @@ impl<'a, Env> TestGuard<'a, Env> {
 
         (Self::builder(env)
          .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)); })
+         .num_threads(4)
          .build(),
          rx)
     }
