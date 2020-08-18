@@ -147,13 +147,15 @@ fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
     Ok(())
 }
 
+use sqlx::Connection;
 #[test]
 // FIXME: This test should work but postgres isn't recognizing default_transaction_read_only for some reason
 // I don't know why.
-// #[ignore]
+#[ignore]
 fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
     crate::initialize();
     let (tx, rx) = channel::bounded(3);
+
     let runner = TestGuard::builder(())
         .num_threads(1)
         .max_tasks(1)
@@ -168,15 +170,14 @@ fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
         failure_job().enqueue(&mut conn).await.unwrap();
         // Since jobs are loaded with `SELECT FOR UPDATE`, it will always fail in
         // read-only mode
-        conn.execute("SET default_transaction_read_only = true").await.unwrap();
+        conn.execute("SET default_transaction_read_only = on").await.unwrap();
     });
 
     let run_result = smol::block_on(runner.run_all_sync_tasks());
 
-
     smol::run(async {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
-        conn.execute("SET default_transaction_read_only = false").await.unwrap();
+        conn.execute("SET default_transaction_read_only = off").await.unwrap();
         assert_matches!(run_result, Err(coil::FetchError::FailedLoadingJob(_)));
     });
 

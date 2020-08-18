@@ -12,7 +12,7 @@ pub fn barrier_job(env: &Barrier) -> Result<(), PerformError> {
 
 #[coil::background_job]
 pub fn failure_job() -> Result<(), PerformError> {
-    Err(PerformError::General("fail on purpose".into()))
+    Err(PerformError::from("fail on purpose".to_string()))
 }
 
 #[coil::background_job]

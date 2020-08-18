@@ -53,34 +53,7 @@ pub enum EnqueueError {
     Encode(#[from] rmp_serde::encode::Error)
 }
 
-#[derive(Debug, Error)]
-pub enum PerformError {
-    #[error("Error decoding task data {0}")]
-    Decode(#[from] rmp_serde::decode::Error),
-    #[error("error while updating failed job {0}")]
-    Sql(#[from] sqlx::Error),
-    #[error("Trying to perform a async job in a sync context or vice-versa")]
-    WrongJob,
-    #[error("Unknown Job Type {0}")]
-    UnknownJob(String),
-    #[error("Future failed to spawn on executor {0}")]
-    FuturesSpawn(#[from] futures::task::SpawnError),
-    #[error("{0}")]
-    General(String),
-}
-
-impl From<&str> for PerformError {
-    fn from(err: &str) -> PerformError {
-        PerformError::General(err.to_string())
-    }
-}
-
-impl From<String> for PerformError {
-    fn from(err: String) -> PerformError {
-        PerformError::General(err)
-    }
-}
-
+pub type PerformError = Box<dyn std::error::Error + Send + Sync>;
 
 #[cfg(any(test, feature = "test_components"))]
 #[derive(Debug, PartialEq)]

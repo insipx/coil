@@ -2,6 +2,7 @@ mod sync;
 mod dummy_jobs;
 mod runner;
 mod test_guard;
+mod codegen;
 
 use coil::Job;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};

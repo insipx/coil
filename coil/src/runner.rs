@@ -256,7 +256,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
             async move {
                 let perform_fn = registry
                     .get(&job.job_type)
-                    .ok_or_else(|| PerformError::UnknownJob(job.job_type.to_string()))?;
+                    .ok_or_else(|| PerformError::from(format!("Unknown job type {}", job.job_type)))?;
                 perform_fn.perform_async(job.data, env, &pg_pool).await
             }
             .boxed()
@@ -271,7 +271,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         self.get_single_sync_job(tx, move |job| {
             let perform_fn = registry
                 .get(&job.job_type)
-                .ok_or_else(|| PerformError::UnknownJob(job.job_type.to_string()))?;
+                .ok_or_else(|| PerformError::from(format!("Unknown job type {}", job.job_type)))?;
             perform_fn.perform_sync(job.data, &env, &pg_pool)
         });
     }

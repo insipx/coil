@@ -36,12 +36,12 @@ pub trait Job: Serialize + DeserializeOwned {
     #[doc(hidden)] 
     fn perform(self, _: &Self::Environment, _: &sqlx::PgPool) -> Result<(), PerformError>
     {
-        Err(PerformError::WrongJob)
+        panic!("Running Sync job when it should be async!");
     }
     
     /// Logic for running an asynchronous job
     #[doc(hidden)] 
     async fn perform_async(self, _: Arc<Self::Environment>, _: &sqlx::PgPool) -> Result<(), PerformError> {
-        Err(PerformError::WrongJob)
+        panic!("Running Async job when it should be sync!");
     }
 }
