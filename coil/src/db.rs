@@ -129,8 +129,7 @@ pub async fn unlocked_tasks_count(conn: impl Executor<'_, Database = Postgres>, 
 /// Gets jobs which failed
 #[cfg(any(test, feature = "test_components"))]
 pub async fn failed_job_count(conn: impl Executor<'_, Database = Postgres>) -> Result<i64, sqlx::Error> {
-    let count = sqlx::query_as::<_, (i64, )>("SELECT COUNT(*) FROM _background_tasks WHERE retries > 0")
-        .fetch_one(conn)
-        .await?;
+    let count = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM _background_tasks WHERE retries > 0")
+        .fetch_one(conn).await?;
     Ok(count.0)
 }

@@ -139,7 +139,6 @@ fn jobs_can_take_a_connection_as_an_argument() -> Fallible<()> {
         takes_fully_qualified_pool().enqueue(&conn)?;
     }
 
-    runner.run_all_pending_jobs()?;
-    runner.check_for_failed_jobs()?;
+    runner.run_all_pending_jobs()?; runner.check_for_failed_jobs()?;
     Ok(())
 }

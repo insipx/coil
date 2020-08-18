@@ -164,8 +164,8 @@ type TxJobPair = Option<(
 // Methods which don't require `RefUnwindSafe`
 impl<Env: 'static> Runner<Env> {
     /// Build the builder for `Runner`
-    pub fn builder(env: Env, executor: impl Spawn + 'static, conn: sqlx::PgPool) -> Builder<Env> {
-        Builder::new(env, executor, conn)
+    pub fn builder(env: Env, executor: impl Spawn + 'static, conn: &sqlx::PgPool) -> Builder<Env> {
+        Builder::new(env, executor, conn.clone())
     }
 
     pub async fn connection(&self) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, Error> {
@@ -389,7 +389,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
 
        if let Some(f) = on_finish {
             f(job_id)
-        }
+       }
     }
 }
 
@@ -413,7 +413,6 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     async fn wait_for_all_tasks(&self, mut rx: channel::Receiver<Event>, pending: usize) {
         let mut dummy_tasks = pending;
         while dummy_tasks > 0 {
-            println!("Remaining: {}", dummy_tasks);
             let timeout = timer::Delay::new(self.timeout);
             futures::select! {
                 msg = rx.next().fuse() => match msg {
@@ -423,7 +422,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     _ => (),
                 },
                 _ = timeout.fuse() => {
-                    println!("TIMED OUT");
+                    log::warn!("TASK WAIT TIMED OUT");
                     break
                 },
             };
@@ -484,7 +483,7 @@ mod tests {
         let database_url =
             dotenv::var("DATABASE_URL").expect("DATABASE_URL must be set to run tests");
         let pool = smol::block_on(sqlx::PgPool::connect(database_url.as_str())).unwrap();
-        crate::Runner::builder((), Executor, pool)
+        crate::Runner::builder((), Executor, &pool)
             .num_threads(2)
             .timeout(std::time::Duration::from_secs(5))
             .build()

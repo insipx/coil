@@ -18,6 +18,7 @@ static INIT: Once = Once::new();
 
 pub fn initialize() {
     INIT.call_once(|| {
+        pretty_env_logger::init();
         let url = dotenv::var("DATABASE_URL").unwrap();
         println!("Running migrations...at {}", url);
         let mut conn = smol::block_on(sqlx::PgConnection::connect(url.as_str())).unwrap();
@@ -74,8 +75,10 @@ fn enqueue_8_jobs_limited_size() {
         resize_image("sinks".to_string()).enqueue(&pool).await.unwrap();
         resize_image("polkadotstingray".to_string()).enqueue(&pool).await.unwrap();
         resize_image("zutomayo".to_string()).enqueue(&pool).await.unwrap();
+    });
+
+    smol::block_on(async move {
         runner.run_all_sync_tasks().await.unwrap();
-        println!("Blocking on checking");
         runner.check_for_failed_jobs(rx, 8).await.unwrap();
     });
 }

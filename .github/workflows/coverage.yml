@@ -46,8 +46,9 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --no-fail-fast -- --test-threads=1
+          args: --no-fail-fast
         env:
+          RUST_LOG: info
           DATABASE_URL: 'postgres://postgres:postgres@localhost:5432/postgres'
           CARGO_INCREMENTAL: '0'
           RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off' # -Cpanic=abort -Zpanic_abort_tests
