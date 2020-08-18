@@ -147,7 +147,6 @@ fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
     Ok(())
 }
 
-use sqlx::Connection;
 #[test]
 // FIXME: This test should work but postgres isn't recognizing default_transaction_read_only for some reason
 // I don't know why.

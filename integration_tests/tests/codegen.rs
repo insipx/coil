@@ -1,10 +1,8 @@
 use crate::dummy_jobs::*;
 use crate::test_guard::TestGuard;
-// use diesel::prelude::*;
-// use failure::Fallible;
-// use swirl::db::DieselPoolObj;
 use anyhow::Result;
 use coil::{FailedJobsError::JobsFailed, PerformError};
+use sqlx::PgPool;
 
 #[test]
 fn generated_jobs_serialize_all_arguments_except_first() {
@@ -93,60 +91,50 @@ fn test_imports_only_used_in_job_body_are_not_warned_as_unused() {
     });
 }
 
-/*
+
 #[test]
-fn jobs_can_take_a_connection_as_an_argument() -> Fallible<()> {
-    use diesel::sql_query;
-
-    #[swirl::background_job]
-    fn takes_env_and_conn(_env: &(), conn: &PgConnection) -> Result<(), swirl::PerformError> {
-        sql_query("SELECT 1").execute(conn)?;
+fn jobs_can_take_a_connection_as_an_argument() {
+    #[coil::background_job]
+    async fn takes_env_and_conn(_env: &(), pool: &PgPool) -> Result<(), coil::PerformError> {
+        sqlx::query("SELECT 1").execute(pool).await?;
         Ok(())
     }
 
-    #[swirl::background_job]
-    fn takes_only_conn(conn: &PgConnection) -> Result<(), swirl::PerformError> {
-        sql_query("SELECT 1").execute(conn)?;
+    #[coil::background_job]
+    fn takes_env_and_conn_sync(_env: &(), pool: &PgPool) -> Result<(), coil::PerformError> {
+        smol::block_on(sqlx::query("SELECT 1").execute(pool))?;
         Ok(())
     }
 
-    #[swirl::background_job]
-    fn takes_connection_pool(pool: &dyn DieselPoolObj) -> Result<(), swirl::PerformError> {
-        let conn1 = pool.get()?;
-        let conn2 = pool.get()?;
-        sql_query("SELECT 1").execute(&**conn1)?;
-        sql_query("SELECT 1").execute(&**conn2)?;
+    #[coil::background_job]
+    async fn takes_just_pool(pool: &PgPool) -> Result<(), coil::PerformError> {
+        let mut conn1 = pool.acquire().await?;
+        let mut conn2 = pool.acquire().await?;
+        sqlx::query("SELECT 1").execute(&mut conn1).await?;
+        sqlx::query("SELECT 1").execute(&mut conn2).await?;
         Ok(())
     }
 
-    #[swirl::background_job]
-    fn takes_fully_qualified_conn(conn: &diesel::PgConnection) -> Result<(), swirl::PerformError> {
-        sql_query("SELECT 1").execute(conn)?;
+    #[coil::background_job]
+    fn takes_fully_qualified_pool(pool: &sqlx::PgPool) -> Result<(), coil::PerformError> {
+        let mut conn1 = smol::block_on(pool.acquire())?;
+        let mut conn2 = smol::block_on(pool.acquire())?;
+        smol::block_on(sqlx::query("SELECT 1").execute(&mut conn1))?;
+        smol::block_on(sqlx::query("SELECT 1").execute(&mut conn2))?;
         Ok(())
     }
 
-    #[swirl::background_job]
-    fn takes_fully_qualified_pool(
-        pool: &dyn swirl::db::DieselPoolObj,
-    ) -> Result<(), swirl::PerformError> {
-        let conn1 = pool.get()?;
-        let conn2 = pool.get()?;
-        sql_query("SELECT 1").execute(&**conn1)?;
-        sql_query("SELECT 1").execute(&**conn2)?;
-        Ok(())
-    }
+    let (runner, rx) = TestGuard::dummy_runner();
+    smol::run(async {
+        let mut conn = runner.connection_pool().acquire().await.unwrap();
+        takes_env_and_conn().enqueue(&mut conn).await.unwrap();
+        takes_env_and_conn_sync().enqueue(&mut conn).await.unwrap();
+        takes_just_pool().enqueue(&mut conn).await.unwrap();
+        takes_fully_qualified_pool().enqueue(&mut conn).await.unwrap();
 
-    let runner = TestGuard::dummy_runner();
-    {
-        let conn = runner.connection_pool().get()?;
-        takes_env_and_conn().enqueue(&conn)?;
-        takes_only_conn().enqueue(&conn)?;
-        takes_connection_pool().enqueue(&conn)?;
-        takes_fully_qualified_conn().enqueue(&conn)?;
-        takes_fully_qualified_pool().enqueue(&conn)?;
-    }
+        runner.run_all_sync_tasks().await.unwrap();
+        runner.run_all_async_tasks().await.unwrap();
 
-    runner.run_all_pending_jobs()?; runner.check_for_failed_jobs()?;
-    Ok(())
+        runner.check_for_failed_jobs(rx, 4).await.unwrap();
+    });
 }
-*/

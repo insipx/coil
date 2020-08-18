@@ -214,37 +214,20 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
             for _ in 0..jobs_to_queue {
                 fun(tx.clone());
             }
-            println!("JOBS TO QUEUE {}", jobs_to_queue);
             pending_messages += jobs_to_queue;
             let timeout = timer::Delay::new(self.timeout);
-            let res = futures::select! {
+            futures::select! {
                 msg = rx.next().fuse() => {
                     match msg {
                         Some(Event::Working) => pending_messages -= 1,
-                        Some(Event::NoJobAvailable) => {
-                            println!("No Job Avail");
-                            return Ok(())
-                        },
-                        Some(Event::ErrorLoadingJob(e)) => {
-                            println!("Error loading job");
-                            return Err(FetchError::FailedLoadingJob(e))
-                        }
-                        None =>  {
-                            println!("No message");
-                            return Err(FetchError::NoMessage.into())
-                        },
-                        _ =>  {
-                            println!("Nothing");
-                            return Ok(())
-                        },
+                        Some(Event::NoJobAvailable) => return Ok(()),
+                        Some(Event::ErrorLoadingJob(e)) => return Err(FetchError::FailedLoadingJob(e)),
+                        None =>  return Err(FetchError::NoMessage.into()),
+                        _ => return Ok(()),
                     }
                 },
-                _ = timeout.fuse() => {
-                    println!("TIMEOUT");
-                    return Err(FetchError::Timeout.into())
-                }
+                _ = timeout.fuse() => return Err(FetchError::Timeout.into())
             };
-            println!("RES: {:?}", res);
         }
     }
 

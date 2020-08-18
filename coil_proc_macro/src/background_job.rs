@@ -16,7 +16,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
     let env_type = &job.args.env_arg.ty;
     let connection_arg = &job.args.connection_arg;
     let pool_pat = connection_arg.pool_pat();
-    // let pool_ty = connection_arg.pool_ty();
+    let pool_ty = connection_arg.pool_ty();
     let fn_args = job.args.iter();
     let struct_def = job.args.struct_def();
     let struct_assign = job.args.struct_assign();
@@ -49,7 +49,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
 
                 async #fn_token perform_async(self,
                     #env_pat: std::sync::Arc<Self::Environment>,
-                    #pool_pat: &sqlx::PgPool
+                    #pool_pat: &#pool_ty
                     ) #return_type
                 {
                     let Self { #(#arg_names_0),* } = self;
@@ -82,7 +82,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 const JOB_TYPE: &'static str = stringify!(#name);
                 const ASYNC: bool = #is_async;
 
-                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &sqlx::PgPool) #return_type {
+                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
                     let Self { #(#arg_names_1),* } = self;
                     #body
                 }
@@ -115,7 +115,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
 
                 async #fn_token perform_async(self,
                     #env_pat: std::sync::Arc<Self::Environment>,
-                    #pool_pat: &sqlx::PgPool
+                    #pool_pat: &#pool_ty
                     ) #return_type
                 {
                     let Self { #(#arg_names_0),* } = self;
@@ -150,7 +150,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 const JOB_TYPE: &'static str = stringify!(#name);
                 const ASYNC: bool = #is_async;
 
-                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &sqlx::PgPool) #return_type {
+                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
                     let Self { #(#arg_names_1),* } = self;
                     #body
                 }
@@ -381,41 +381,24 @@ impl Default for EnvArg {
 
 enum ConnectionArg {
     None,
-    SingleConnection(Box<syn::Pat>),
     Pool(Box<syn::Pat>, Box<syn::Type>),
 }
 
 impl ConnectionArg {
-    fn is_single_connection(ty: &syn::Type) -> bool {
-        if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
-            path_ends_with(path, "PgConnection")
-        } else {
-            false
-        }
-    }
-
     fn is_pool(ty: &syn::Type) -> bool {
-        if let syn::Type::TraitObject(type_trait_object) = ty {
-            type_trait_object.bounds.iter().any(|bound| {
-                if let syn::TypeParamBound::Trait(trait_bound) = bound {
-                    path_ends_with(&trait_bound.path, "PgPool")
-                } else {
-                    false
-                }
-            })
+        if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
+            path_ends_with(path, "PgPool")
         } else {
             false
         }
     }
 
     fn is_connection_arg(ty: &syn::Type) -> bool {
-        Self::is_single_connection(ty) || Self::is_pool(ty)
+       /* Self::is_single_connection(ty) ||*/ Self::is_pool(ty)
     }
 
     fn from_arg(pat: Box<syn::Pat>, ty: Box<syn::Type>) -> Self {
-        if Self::is_single_connection(&ty) {
-            ConnectionArg::SingleConnection(pat)
-        } else if Self::is_pool(&ty) {
+        if Self::is_pool(&ty) {
             ConnectionArg::Pool(pat, ty)
         } else {
             ConnectionArg::None
@@ -425,13 +408,10 @@ impl ConnectionArg {
     fn pool_pat(&self) -> Cow<'_, syn::Pat> {
         match self {
             ConnectionArg::None => Cow::Owned(syn::parse_quote!(_)),
-            ConnectionArg::SingleConnection(_) => {
-                Cow::Owned(syn::parse_quote!(__coil_connection_pool))
-            }
             ConnectionArg::Pool(pat, _) => Cow::Borrowed(pat),
         }
     }
-/*
+
     fn pool_ty(&self) -> Cow<'_, syn::Type> {
         if let ConnectionArg::Pool(_, ty) = self {
             Cow::Borrowed(ty)
@@ -439,17 +419,10 @@ impl ConnectionArg {
             Cow::Owned(syn::parse_quote!(sqlx::PgPool))
         }
     }
-*/
+
     fn wrap(&self, body: Vec<syn::Stmt>) -> TokenStream {
-        let mut body = quote!(#(#body)*);
-        if let ConnectionArg::SingleConnection(pat) = self {
-            let pool_pat = self.pool_pat();
-            body = quote! {
-                #pool_pat.with_connection(&|#pat| {
-                    #body
-                })
-            }
-        }
+        let body = quote!(#(#body)*);
+        // can wrap conection if we want to do fancy stuff in the future
         body
     }
 }

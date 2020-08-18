@@ -21,7 +21,6 @@ pub fn initialize() {
     INIT.call_once(|| {
         pretty_env_logger::init();
         let url = dotenv::var("DATABASE_URL").unwrap();
-        println!("Running migrations...at {}", url);
         let mut conn = smol::block_on(sqlx::PgConnection::connect(url.as_str())).unwrap();
         smol::block_on(coil::migrate(&mut conn)).unwrap();
     });
