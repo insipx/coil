@@ -14,6 +14,7 @@ fn run_all_pending_jobs_returns_when_all_jobs_enqueued() -> Result<()> {
     crate::initialize();
     let barrier = Barrier::new(3);
     let (runner, _wait_task) = TestGuard::runner(barrier.clone(), 2);
+    log::info!("RUNNING `run_all_pending_jobs_returns_when_all_jobs_enqueued`");
     let conn = runner.connection_pool();
 
     smol::block_on(async {
@@ -45,6 +46,7 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
     crate::initialize();
     let barrier = Barrier::new(3);
     let (runner, task_wait) = TestGuard::runner(barrier.clone(), 2);
+    log::info!("RUNNING `check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished`")
     let conn = runner.connection_pool();
     smol::block_on(async {
         barrier_job().enqueue(&conn).await?;
@@ -85,6 +87,7 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
 fn check_for_failed_jobs_panics_if_jobs_failed() -> Result<()> {
     crate::initialize();
     let (runner, rx) = TestGuard::dummy_runner();
+    log::info!("RUNNING `check_for_failed_jobs_panics_if_jobs_failed`")
     let conn = runner.connection_pool();
     smol::block_on(async {
         failure_job().enqueue(&conn).await?;
@@ -101,6 +104,7 @@ fn check_for_failed_jobs_panics_if_jobs_failed() -> Result<()> {
 fn panicking_jobs_are_caught_and_treated_as_failures() -> Result<()> {
     crate::initialize();
     let (runner, rx) = TestGuard::dummy_runner();
+    log::info!("RUNNING `panicking_jobs_are_caught_and_treated_as_failures`");
     let conn = runner.connection_pool();
     smol::block_on(async {
         panic_job().enqueue(&conn).await?;
@@ -126,7 +130,7 @@ fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
         .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)); })
         .timeout(Duration::from_millis(50))
         .build();
-
+    log::info!("RUNNING `run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout`");
     let conn = runner.connection_pool();
     smol::block_on(async {
         barrier_job().enqueue(&conn).await?;
@@ -158,7 +162,7 @@ fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
             let _ = smol::block_on(tx.send(coil::Event::Dummy));
         })
         .build();
-
+    log::info!("RUNNING `jobs_failing_to_load_doesnt_panic_threads`");
     smol::run(async {
         let conn = runner.connection_pool();
         failure_job().enqueue(&conn).await.unwrap();

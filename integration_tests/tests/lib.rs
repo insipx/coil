@@ -64,6 +64,7 @@ fn resize_image_gen<E: Serialize + DeserializeOwned + Send + std::fmt::Display>(
 fn enqueue_8_jobs_limited_size() {
     initialize();
     let (runner, rx) = TestGuard::runner((), 8);
+    log::info!("RUNNING `enqueue_8_jobs_limited_size`");
 
     let pool = runner.connection_pool();
     smol::run(async {
@@ -91,6 +92,7 @@ fn generic_jobs_can_be_enqueued() {
         .register_job::<resize_image_gen::Job<String>>()
         .on_finish(move |_| { smol::block_on(tx.send(coil::Event::Dummy)).unwrap(); })
         .build();
+    log::info!("RUNNING `generic_jobs_can_be_enqueued`");
     let pool = runner.connection_pool();
 
     smol::run(async {
