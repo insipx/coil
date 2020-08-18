@@ -13,6 +13,26 @@ use syn::{parse_macro_input, ItemFn};
 
 use diagnostic_shim::*;
 
+/// The attribute macro for creating background jobs.
+///
+/// # Examples
+///
+/// ```ignore
+/// // I cant be asynchronous because I'll block the executor
+/// #[background_job]
+/// fn perform_heavy_computation(foo: HeavyComputation) -> Result<(), PerformError> {
+///     foo.compute()?;
+///     Ok(())
+/// }
+/// ````
+///
+/// ```ignore
+/// #[background_job]
+/// async fn crawl_for_new_info(website: Website) -> Result<(), PerformError> {
+///     let content = website.get_content().await?;
+///     content.modify().send_to_actor_pipeline();
+/// }
+/// ````
 #[proc_macro_attribute]
 pub fn background_job(attr: TokenStream, item: TokenStream) -> TokenStream {
     if !attr.is_empty() {

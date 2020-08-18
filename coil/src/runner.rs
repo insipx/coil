@@ -41,6 +41,7 @@ pub struct Builder<Env> {
 }
 
 impl<Env: 'static> Builder<Env> {
+    /// Instantiate a new instance of the Builder
     pub fn new(env: Env, executor: impl Spawn + 'static, pg_pool: sqlx::PgPool) -> Self {
         Self {
             environment: env,
@@ -79,11 +80,13 @@ impl<Env: 'static> Builder<Env> {
         self
     }
 
+    /// specify the amount of threads to run the threadpool with
     pub fn num_threads(mut self, threads: usize) -> Self {
         self.num_threads = Some(threads);
         self
     }
 
+    /// Specify the maximum tasks  to queue in the threadpool at any given time
     pub fn max_tasks(mut self, max_tasks: usize) -> Self {
         self.max_tasks = Some(max_tasks);
         self
@@ -96,14 +99,15 @@ impl<Env: 'static> Builder<Env> {
         self
     }
 
-    // TODO: this description is not true
     /// Set a timeout in seconds.
-    /// This is the maximum amount of time we will wait until classifying a task as a failure and updating the retry counter.
+    /// This timeout is the maximum amount of time coil will wait for a job to begin
+    /// before returning an error.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
+    /// Build the runner
     pub fn build(self) -> Result<Runner<Env>, Error> {
         let threadpool = if let Some(t) = self.num_threads {
             rayon::ThreadPoolBuilder::new()
@@ -144,6 +148,7 @@ pub struct Runner<Env> {
     timeout: Duration,
 }
 
+///
 pub enum Event {
     /// Queues are currently working
     Working,
@@ -152,6 +157,7 @@ pub enum Event {
     /// An error occurred loading the job from the database
     ErrorLoadingJob(sqlx::Error),
     /// Test for waiting on dummy tasks
+    #[doc(hidden)]
     #[cfg(any(test, feature = "test_components"))]
     Dummy,
 }
@@ -168,11 +174,13 @@ impl<Env: 'static> Runner<Env> {
         Builder::new(env, executor, conn.clone())
     }
 
+    /// Get a Pool Connection from the pool that the runner is using.
     pub async fn connection(&self) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, Error> {
         let conn = self.pg_pool.acquire().await?;
         Ok(conn)
     }
 
+    /// Get the connection pool that the runner is using
     pub fn connection_pool(&self) -> sqlx::PgPool {
         self.pg_pool.clone()
     }

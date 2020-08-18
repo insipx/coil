@@ -4,7 +4,7 @@
 An async task queue built with SQLx, Postgres, and Rayon
 
 ![](https://github.com/insipx/coil/workflows/Unit%20and%20Integration%20Tests/badge.svg)
-[![Code Coverage](https://coveralls.io/repos/github/insipx/coil/badge.svg?branch=master)](https://coveralls.io/github/insipx/coil?branch=master)
+[![Coverage](https://coveralls.io/repos/github/insipx/coil/badge.svg?branch=master)](https://coveralls.io/github/insipx/coil?branch=master)
 
 </div>
 
