@@ -20,7 +20,7 @@ pub struct TestGuard<'a, Env: 'static> {
 impl<'a, Env> TestGuard<'a, Env> {
     pub fn builder(env: Env) -> GuardBuilder<Env> {
         let pg_pool = sqlx::postgres::PgPoolOptions::new()
-            .min_connections(16)
+            .min_connections(10)
             .idle_timeout(std::time::Duration::from_millis(1000))
             .connect_lazy(&crate::DATABASE_URL).unwrap();
         let builder = Runner::builder(env, crate::Executor, &pg_pool);

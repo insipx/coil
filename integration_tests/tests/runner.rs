@@ -150,7 +150,7 @@ fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
 #[test]
 // FIXME: This test should work but postgres isn't recognizing default_transaction_read_only for some reason
 // I don't know why.
-#[ignore]
+// #[ignore]
 fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
     crate::initialize();
     let (tx, rx) = channel::bounded(3);
@@ -164,23 +164,25 @@ fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
         .build();
     log::info!("RUNNING `jobs_failing_to_load_doesnt_panic_threads`");
     smol::run(async {
-        let conn = runner.connection_pool();
-        failure_job().enqueue(&conn).await.unwrap();
-
+        let mut conn = runner.connection_pool().acquire().await.unwrap();
+        failure_job().enqueue(&mut conn).await.unwrap();
         // Since jobs are loaded with `SELECT FOR UPDATE`, it will always fail in
         // read-only mode
         conn.execute("SET default_transaction_read_only = true").await.unwrap();
-        timer::Delay::new(std::time::Duration::from_millis(500)).await;
-        let run_result = runner.run_all_sync_tasks().await;
-        conn.execute("SET default_transaction_read_only = false").await.unwrap();
-
-        assert_matches!(run_result, Err(coil::FetchError::FailedLoadingJob(_)));
-
-        // this one is supposed to time out because the job is never actually 'run'
-        // because we can't grab it due to read-only transaction
-        runner.check_for_failed_jobs(rx, 1).await.unwrap();
     });
 
+    let run_result = smol::block_on(runner.run_all_sync_tasks());
+
+
+    smol::run(async {
+        let mut conn = runner.connection_pool().acquire().await.unwrap();
+        conn.execute("SET default_transaction_read_only = false").await.unwrap();
+        assert_matches!(run_result, Err(coil::FetchError::FailedLoadingJob(_)));
+    });
+
+    // this test is supposed to time out because the job is never actually 'run'
+    // because we can't grab it due to read-only transaction
+    smol::block_on(runner.check_for_failed_jobs(rx, 1)).unwrap();
 
     Ok(())
 }

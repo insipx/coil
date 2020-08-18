@@ -16,7 +16,7 @@
 
 use crate::error::{EnqueueError, PerformError};
 use serde::{Serialize, de::DeserializeOwned};
-use sqlx::PgPool;
+use sqlx::{Executor, Postgres};
 use std::sync::Arc;
 
 #[async_trait::async_trait]
@@ -28,8 +28,8 @@ pub trait Job: Serialize + DeserializeOwned {
 
     /// inserts the job into the Postgres Database
 
-    async fn enqueue(self, pool: &PgPool) -> Result<(), EnqueueError> {
-        crate::db::enqueue_job(pool, self).await
+    async fn enqueue<'a, C>(self, conn: C) -> Result<(), EnqueueError> where C: Executor<'a, Database = Postgres> {
+        crate::db::enqueue_job(conn, self).await
     }
     
     /// Logic for running a synchronous job
