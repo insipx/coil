@@ -73,5 +73,3 @@ pub fn initialize() {
         smol::block_on(crate::migrate(&mut conn)).unwrap();
     });
 }
-
-

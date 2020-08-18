@@ -19,15 +19,25 @@ use serde::{Serialize, de::DeserializeOwned};
 use sqlx::{Executor, Postgres};
 use std::sync::Arc;
 
+/// Background job
 #[async_trait::async_trait]
 pub trait Job: Serialize + DeserializeOwned {
+
+    ///  The environment this job is run with.
+    ///  This is a struct you define,
+    ///  which should encapsulate things like database connection pools,
+    ///  any configuration, and any other static data or shared resources.
     type Environment: 'static + Send + Sync;
+
+    /// The key to use for storing this job.
+    /// Typically this is the name of your struct in `snake_case`.
     const JOB_TYPE: &'static str;
-    #[doc(hidden)] 
+    #[doc(hidden)]
+
+    /// Marker for whether this trait should be executed with `perform_async`
     const ASYNC: bool;
 
     /// inserts the job into the Postgres Database
-
     async fn enqueue<'a, C>(self, conn: C) -> Result<(), EnqueueError> where C: Executor<'a, Database = Postgres> {
         crate::db::enqueue_job(conn, self).await
     }
