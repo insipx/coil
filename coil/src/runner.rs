@@ -378,14 +378,11 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 eprintln!("Job {} failed to run: {}", job_id, e);
                 db::update_failed_job(&mut trx, job_id)
                     .await
-                    .expect("failed to update failed job!");
+                    .expect(&format!("failed to update failed job: {:?}", e));
             }
         }
 
-        trx.commit()
-            .await
-            .map_err(|e| panic!("Failed to commit transaction {:?}", e))
-            .expect("Panic is mapped");
+        trx.commit().await.expect("Failed to commit transaction");
 
        if let Some(f) = on_finish {
             f(job_id)

@@ -42,6 +42,7 @@ impl<'a> TestGuard<'a, ()> {
     pub fn dummy_runner() -> (Self, channel::Receiver<coil::Event>) {
         let (tx, rx) = channel::unbounded();
         (Self::builder(())
+         .num_threads(4)
          .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)); })
          .build(),
          rx)
