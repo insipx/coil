@@ -46,7 +46,7 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
     crate::initialize();
     let barrier = Barrier::new(3);
     let (runner, task_wait) = TestGuard::runner(barrier.clone(), 2);
-    log::info!("RUNNING `check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished`")
+    log::info!("RUNNING `check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished`");
     let conn = runner.connection_pool();
     smol::block_on(async {
         barrier_job().enqueue(&conn).await?;
@@ -87,7 +87,7 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
 fn check_for_failed_jobs_panics_if_jobs_failed() -> Result<()> {
     crate::initialize();
     let (runner, rx) = TestGuard::dummy_runner();
-    log::info!("RUNNING `check_for_failed_jobs_panics_if_jobs_failed`")
+    log::info!("RUNNING `check_for_failed_jobs_panics_if_jobs_failed`");
     let conn = runner.connection_pool();
     smol::block_on(async {
         failure_job().enqueue(&conn).await?;
