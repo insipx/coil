@@ -223,9 +223,10 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 fun(tx.clone());
             }
             pending_messages += jobs_to_queue;
-            let timeout = timer::Delay::new(self.timeout);
+            let timeout = timer::Delay::new(self.timeout).fuse();
+            let next_msg = rx.next().fuse();
             futures::select! {
-                msg = rx.next().fuse() => {
+                msg = next_msg => {
                     match msg {
                         Some(Event::Working) => pending_messages -= 1,
                         Some(Event::NoJobAvailable) => return Ok(()),
@@ -234,7 +235,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                         _ => return Ok(()),
                     }
                 },
-                _ = timeout.fuse() => return Err(FetchError::Timeout.into())
+                _ = timeout => return Err(FetchError::Timeout.into())
             };
         }
     }
