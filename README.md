@@ -5,7 +5,12 @@ An async task queue built with SQLx, Postgres, and Rayon
 
 ![](https://github.com/insipx/coil/workflows/Unit%20and%20Integration%20Tests/badge.svg)
 [![Coverage](https://coveralls.io/repos/github/insipx/coil/badge.svg?branch=master)](https://coveralls.io/github/insipx/coil?branch=master)
-
+<a href="https://crates.io/crates/coil">
+	![Crates.io](https://img.shields.io/crates/d/coil)
+</a>
+<a href="https://crates.io/crates/coil">
+	![Crates.io](https://img.shields.io/crates/v/coil)
+</a>
 </div>
 
 Coil is heavily inspired by and takes heavily from [swirl](https://github.com/sgrif/swirl). In many places of the codebase, code is very similiar.
