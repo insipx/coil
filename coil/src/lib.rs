@@ -21,13 +21,7 @@
 //! - Queue functions with generics
 //! - SQL queries in `coil` are ran asynchronously wherever possible
 //! - Migrations are stored in the binary, and accessible via a `migrate()` fn. No more needing to copy-paste migration files!
-//!
-//!
-//!
-//!
-//!
-//!
-//!
+
 
 mod error;
 mod db;
