@@ -223,8 +223,8 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 fun(tx.clone());
             }
             pending_messages += jobs_to_queue;
-            let timeout = timer::Delay::new(self.timeout).fuse();
-            let next_msg = rx.next().fuse();
+            let mut timeout = timer::Delay::new(self.timeout).fuse();
+            let mut next_msg = rx.next().fuse();
             futures::select! {
                 msg = next_msg => {
                     match msg {
