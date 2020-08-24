@@ -1,4 +1,3 @@
-with import <nixpkgs> { };
 let
   moz_overlay = (import "/home/insipx/.config/nixpkgs/overlays/rust-overlay.nix");
   nixpkgs = import <nixpkgs> { overlays = [ moz_overlay ]; };

@@ -222,13 +222,13 @@ impl BackgroundJob {
         if !sig.generics.params.is_empty() {
             generics_exist = true;
         }
-
+    /*
         if let Some(where_clause) = sig.generics.where_clause {
             return Err(where_clause.where_token.span.error(
                 "#[coil::background_job] cannot be used on functions with a where clause",
             ));
         }
-
+    */
         let fn_token = sig.fn_token;
         let return_type = sig.output.clone();
         let ident = sig.ident.clone();
