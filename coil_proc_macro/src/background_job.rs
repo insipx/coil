@@ -93,7 +93,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
 
                 #[derive(coil::Serialize, coil::Deserialize)]
                 #[serde(crate = "coil::serde")]
-                pub struct Job #ty_generics #where_clause {
+                pub struct Job #ty_generics {
                     #(#struct_def),*
                 }
             }

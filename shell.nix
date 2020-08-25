@@ -1,7 +1,9 @@
 let
   moz_overlay = (import "/home/insipx/.config/nixpkgs/overlays/rust-overlay.nix");
   nixpkgs = import <nixpkgs> { overlays = [ moz_overlay ]; };
-  ruststable = (nixpkgs.latest.rustChannels.stable.rust.override { extensions = [ "rust-src" "rust-analysis" "rustfmt-preview" ];});
+  unstable = import (fetchTarball "channel:nixos-unstable") {};
+  rustnightly = ((nixpkgs.rustChannelOf { date = "2020-08-17"; channel = "nightly"; }).rust.override { extensions = [ "rust-src" "rust-analysis" "rustfmt-preview" ]; targets = ["wasm32-unknown-unknown"]; });
+
 in
   with nixpkgs;
   pkgs.mkShell {
@@ -9,8 +11,8 @@ in
       openssl
       pkg-config
       nasm
-      rustup
-      ruststable
+      rustnightly
+      unstable.cargo-expand
       cmake
       zlib
       postgresql

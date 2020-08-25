@@ -21,7 +21,7 @@ serde = "1.0"
 rmp-serde = "0.14"
 thiserror = "1.0"
 inventory = "0.1"
-coil_proc_macro = "0.1"
+coil_proc_macro = { path = "../coil_proc_macro/" }
 futures = "0.3.5"
 async-trait = "0.1.36"
 timer = { version = "3.0", package = "futures-timer" }

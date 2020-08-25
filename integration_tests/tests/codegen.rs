@@ -2,6 +2,7 @@ use crate::dummy_jobs::*;
 use crate::test_guard::TestGuard;
 use anyhow::Result;
 use coil::{FailedJobsError::JobsFailed, PerformError};
+use serde::{de::DeserializeOwned, Serialize};
 use sqlx::PgPool;
 
 #[test]
@@ -138,3 +139,32 @@ fn jobs_can_take_a_connection_as_an_argument() {
         runner.check_for_failed_jobs(rx, 4).await.unwrap();
     });
 }
+
+
+#[test]
+fn proc_macro_accepts_arbitrary_where_clauses() {
+
+    #[coil::background_job]
+    fn can_specify_where_clause<S>(_eng: &(), arg: S) -> Result<(), coil::PerformError> 
+    where
+        S: Serialize + DeserializeOwned + std::fmt::Display
+    {
+        arg.to_string();
+        Ok(())
+    }
+    
+    let (tx, rx) = channel::bounded(1);
+    let runner = TestGuard::builder(())
+        .register_job::<can_specify_where_clause::Job<String>>()
+        .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)).unwrap(); })
+        .build();
+    
+    smol::block_on(async {
+        let mut conn = runner.connection_pool().acquire().await.unwrap();
+        can_specify_where_clause("hello".to_string()).enqueue(&mut conn).await.unwrap();
+
+        runner.run_all_sync_tasks().await.unwrap();
+        runner.check_for_failed_jobs(rx, 1).await.unwrap();
+    });
+}
+
