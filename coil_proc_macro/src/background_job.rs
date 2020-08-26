@@ -57,12 +57,12 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 }
             }
 
-            mod #name {
+            pub(crate) mod #name {
                 use super::*;
 
                 #[derive(coil::Serialize, coil::Deserialize)]
                 #[serde(crate = "coil::serde")]
-                pub struct Job #ty_generics #where_clause {
+                pub struct Job #ty_generics {
                     #(#struct_def),*
                 }
             }
@@ -88,7 +88,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 }
             }
 
-            mod #name {
+            pub(crate) mod #name {
                 use super::*;
 
                 #[derive(coil::Serialize, coil::Deserialize)]
@@ -123,7 +123,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 }
             }
 
-            mod #name {
+            pub(crate) mod #name {
                 use super::*;
 
                 #[derive(coil::Serialize, coil::Deserialize)]
@@ -156,7 +156,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 }
             }
 
-            mod #name {
+            pub(crate) mod #name {
                 use super::*;
 
                 #[derive(coil::Serialize, coil::Deserialize)]

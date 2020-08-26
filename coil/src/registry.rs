@@ -40,7 +40,7 @@ impl<Env: 'static> Registry<Env> {
         if  TypeId::of::<T::Environment>() == TypeId::of::<Env>() {
             self.jobs.insert(T::JOB_TYPE, JobVTable::from_job::<T>());
         } else {
-            log::warn!("could not register job");
+            log::warn!("could not register job {}", T::JOB_TYPE);
         }
     }
 

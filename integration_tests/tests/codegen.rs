@@ -149,7 +149,7 @@ fn proc_macro_accepts_arbitrary_where_clauses() {
     where
         S: Serialize + DeserializeOwned + std::fmt::Display
     {
-        arg.to_string();
+         arg.to_string();
         Ok(())
     }
     
