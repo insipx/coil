@@ -190,28 +190,29 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
 
     /// Run all synchronous tasks
     /// Spawns synchronous tasks onto a rayon threadpool
-    pub async fn run_all_sync_tasks(&self) -> Result<(), FetchError> {
-        self.run_pending_tasks(|tx| self.run_single_sync_job(tx)).await?;
-        Ok(())
+    /// Returns how many tasks were actually queued
+    pub async fn run_all_sync_tasks(&self) -> Result<usize, FetchError> {
+        self.run_pending_tasks(|tx| self.run_single_sync_job(tx)).await
     }
 
     /// Run all asynchronous tasks
     /// Spawns asynchronous tasks onto the specified executor
-    pub async fn run_all_async_tasks(&self) -> Result<(), FetchError> {
+    /// Returns how many tasks were actually queued
+    pub async fn run_all_async_tasks(&self) -> Result<usize, FetchError> {
         self.run_pending_tasks(|tx| self.run_single_async_job(tx))
-            .await?;
-        Ok(())
+            .await
     }
 
     /// Runs all the pending tasks in a loop
-    async fn run_pending_tasks<F>(&self, fun: F) -> Result<(), FetchError>
+    /// Returns how many tasks were actually queued
+    async fn run_pending_tasks<F>(&self, fun: F) -> Result<usize, FetchError>
     where
         F: Fn(Sender<Event>)
     {
         let (tx, mut rx) = channel::bounded(self.max_tasks);
 
         let mut pending_messages = 0;
-
+        let mut queued = 0;
         loop {
             let jobs_to_queue = if pending_messages == 0 {
                 self.max_tasks
@@ -228,11 +229,14 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
             futures::select! {
                 msg = next_msg => {
                     match msg {
-                        Some(Event::Working) => pending_messages -= 1,
-                        Some(Event::NoJobAvailable) => return Ok(()),
+                        Some(Event::Working) => { 
+                            pending_messages -= 1;
+                            queued += 1;
+                        },
+                        Some(Event::NoJobAvailable) => return Ok(queued),
                         Some(Event::ErrorLoadingJob(e)) => return Err(FetchError::FailedLoadingJob(e)),
                         None =>  return Err(FetchError::NoMessage.into()),
-                        _ => return Ok(()),
+                        _ => return Ok(queued),
                     }
                 },
                 _ = timeout => return Err(FetchError::Timeout.into())
