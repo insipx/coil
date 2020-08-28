@@ -24,10 +24,7 @@ use sqlx::Postgres;
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe, PanicInfo, RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use std::time::Duration;
 
 /// Builder pattern struct for the Runner
@@ -41,7 +38,6 @@ pub struct Builder<Env> {
     on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
     /// Amount of time to wait until job is deemed a failure
     timeout: Option<Duration>,
-    keep_queue_constant: Option<Arc<AtomicUsize>>,
 }
 
 impl<Env: 'static> Builder<Env> {
@@ -56,7 +52,6 @@ impl<Env: 'static> Builder<Env> {
             registry: Registry::load(),
             on_finish: None,
             timeout: None,
-            keep_queue_constant: None,
         }
     }
 
@@ -96,18 +91,7 @@ impl<Env: 'static> Builder<Env> {
         self.max_tasks = Some(max_tasks);
         self
     }
-
-    /// Make sure the number of items in the queue
-    /// never exceeds `max_tasks`
-    ///
-    /// # Note
-    /// This may mean less items are kept in the queue at any given time.
-    /// It is guaranteed, however, that `self.max_tasks` items is not exceeded.
-    pub fn keep_queue_constant(mut self) -> Self {
-        self.keep_queue_constant = Some(Arc::new(AtomicUsize::new(0)));
-        self
-    }
-
+   
     /// Provide a hook that runs after a job has finished and all destructors have run
     /// the `on_finish` closure accepts the job ID that finished as an argument
     pub fn on_finish(mut self, on_finish: impl Fn(i64) + Send + Sync + 'static) -> Self {
@@ -134,12 +118,8 @@ impl<Env: 'static> Builder<Env> {
         };
         let threadpool = threadpool.build()?;
 
-        let max_tasks = self
-            .max_tasks
-            .unwrap_or_else(|| threadpool.current_num_threads());
-        let timeout = self
-            .timeout
-            .unwrap_or_else(|| std::time::Duration::from_secs(5));
+        let max_tasks = self.max_tasks.unwrap_or_else(|| threadpool.current_num_threads());
+        let timeout = self.timeout.unwrap_or_else(|| std::time::Duration::from_secs(5));
         Ok(Runner {
             threadpool,
             executor: self.executor,
@@ -147,7 +127,6 @@ impl<Env: 'static> Builder<Env> {
             environment: Arc::new(self.environment),
             registry: Arc::new(self.registry),
             max_tasks,
-            keep_queue_constant: self.keep_queue_constant,
             on_finish: self.on_finish,
             timeout,
         })
@@ -165,7 +144,6 @@ pub struct Runner<Env> {
     registry: Arc<Registry<Env>>,
     /// maximum number of tasks to run at any one time
     max_tasks: usize,
-    keep_queue_constant: Option<Arc<AtomicUsize>>,
     on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
     timeout: Duration,
 }
@@ -209,12 +187,12 @@ impl<Env: 'static> Runner<Env> {
 }
 
 impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
+
     /// Run all synchronous tasks
     /// Spawns synchronous tasks onto a rayon threadpool
     /// Returns how many tasks were actually queued
     pub async fn run_all_sync_tasks(&self) -> Result<usize, FetchError> {
-        self.run_pending_tasks(|tx| self.run_single_sync_job(tx))
-            .await
+        self.run_pending_tasks(|tx| self.run_single_sync_job(tx)).await
     }
 
     /// Run all asynchronous tasks
@@ -226,10 +204,10 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     }
 
     /// Runs all the pending tasks in a loop
-    /// Returns how many tasks were actually queued
+    /// Returns how many tasks are running as a result
     async fn run_pending_tasks<F>(&self, fun: F) -> Result<usize, FetchError>
     where
-        F: Fn(Sender<Event>),
+        F: Fn(Sender<Event>)
     {
         let (tx, mut rx) = channel::bounded(self.max_tasks);
 
@@ -247,22 +225,15 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
             }
 
             pending_messages += jobs_to_queue;
-            log::info!(
-                "Queueing: {}, {:?} in queue",
-                jobs_to_queue,
-                self.keep_queue_constant
-            );
+            
             let mut timeout = timer::Delay::new(self.timeout).fuse();
             let mut next_msg = rx.next().fuse();
             futures::select! {
                 msg = next_msg => {
                     match msg {
-                        Some(Event::Working) => {
+                        Some(Event::Working) => { 
                             pending_messages -= 1;
                             queued += 1;
-                            if let Some(q) = self.keep_queue_constant.as_ref() {
-                                q.fetch_add(1, Ordering::Relaxed);
-                            }
                         },
                         Some(Event::NoJobAvailable) => return Ok(queued),
                         Some(Event::ErrorLoadingJob(e)) => return Err(FetchError::FailedLoadingJob(e)),
@@ -281,9 +252,9 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         let pg_pool = self.pg_pool.clone();
         self.get_single_async_job(tx, |job| {
             async move {
-                let perform_fn = registry.get(&job.job_type).ok_or_else(|| {
-                    PerformError::from(format!("Unknown job type {}", job.job_type))
-                })?;
+                let perform_fn = registry
+                    .get(&job.job_type)
+                    .ok_or_else(|| PerformError::from(format!("Unknown job type {}", job.job_type)))?;
                 perform_fn.perform_async(job.data, env, &pg_pool).await
             }
             .boxed()
@@ -313,7 +284,6 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     {
         let pg_pool = self.pg_pool.clone();
         let finish_hook = self.on_finish.clone();
-        let queue_size = self.keep_queue_constant.clone();
         let _ = self.executor.spawn(async move {
             let run = || -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>> {
                 async move {
@@ -327,14 +297,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     // TODO: Need to decide how or if we should handle panics in futures. Wrap with catch_unwind?
                     // Since we require the `Spawn` trait, the task executor should handle panics, not us?
                     // However, since we _dont_ handle panics, retry_counter won't be updated
-                    Self::finish_work(
-                        fun(job).await,
-                        transaction,
-                        job_id,
-                        queue_size.as_ref(),
-                        finish_hook,
-                    )
-                    .await;
+                    Self::finish_work(fun(job).await, transaction, job_id, finish_hook).await;
                     Ok(())
                 }
                 .boxed()
@@ -354,7 +317,6 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     {
         let pg_pool = self.pg_pool.clone();
         let finish_hook = self.on_finish.clone();
-        let queue_size = self.keep_queue_constant.clone();
         self.threadpool.spawn_fifo(move || {
             let res = move || -> Result<(), PerformError> {
                 let (transaction, job) =
@@ -367,18 +329,12 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 let result = catch_unwind(|| fun(job))
                     .map_err(|e| try_to_extract_panic_info(&e))
                     .and_then(|r| r);
-                block_on(Self::finish_work(
-                    result,
-                    transaction,
-                    job_id,
-                    queue_size.as_ref(),
-                    finish_hook,
-                ));
+                block_on(Self::finish_work(result, transaction, job_id, finish_hook));
                 Ok(())
             };
 
             match res() {
-                Ok(_) => {}
+                Ok(_) => {},
                 Err(e) => {
                     panic!("Failed to update job: {:?}", e);
                 }
@@ -417,7 +373,6 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         res: Result<(), PerformError>,
         mut trx: sqlx::Transaction<'static, Postgres>,
         job_id: i64,
-        queue_size: Option<&Arc<AtomicUsize>>,
         on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
     ) {
         match res {
@@ -436,9 +391,6 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         }
 
         trx.commit().await.expect("Failed to commit transaction");
-        if let Some(q) = queue_size {
-            q.fetch_sub(1, Ordering::Relaxed);
-        }
         if let Some(f) = on_finish {
             f(job_id)
         }
@@ -459,6 +411,7 @@ fn try_to_extract_panic_info(info: &(dyn Any + Send + 'static)) -> PerformError 
 
 #[cfg(any(test, feature = "test_components"))]
 impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
+
     /// Wait for tasks to finish based on timeout
     /// this is mostly used for internal tests
     async fn wait_for_all_tasks(&self, mut rx: channel::Receiver<Event>, pending: usize) {
@@ -481,11 +434,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     }
 
     /// Check for any jobs that may have failed
-    pub async fn check_for_failed_jobs(
-        &self,
-        rx: channel::Receiver<Event>,
-        pending: usize,
-    ) -> Result<(), FailedJobsError> {
+    pub async fn check_for_failed_jobs(&self, rx: channel::Receiver<Event>, pending: usize) -> Result<(), FailedJobsError> {
         self.wait_for_all_tasks(rx, pending).await;
         let num_failed = db::failed_job_count(&self.pg_pool).await.unwrap();
         if num_failed == 0 {
@@ -598,25 +547,27 @@ mod tests {
         }));
 
         smol::run(async move {
-            runner.get_single_async_job(tx.clone(), move |job| {
-                async move {
-                    fetch_barrier.0.wait();
-                    assert_eq!(first_job_id, job.id);
-                    return_barrier.0.wait();
-                    Ok(())
-                }
-                .boxed()
-            });
+            runner
+                .get_single_async_job(tx.clone(), move |job| {
+                    async move {
+                        fetch_barrier.0.wait();
+                        assert_eq!(first_job_id, job.id);
+                        return_barrier.0.wait();
+                        Ok(())
+                    }
+                    .boxed()
+                });
 
             fetch_barrier2.0.wait();
-            runner.get_single_async_job(tx.clone(), move |job| {
-                async move {
-                    assert_eq!(second_job_id, job.id);
-                    return_barrier2.0.wait();
-                    Ok(())
-                }
-                .boxed()
-            });
+            runner
+                .get_single_async_job(tx.clone(), move |job| {
+                    async move {
+                        assert_eq!(second_job_id, job.id);
+                        return_barrier2.0.wait();
+                        Ok(())
+                    }
+                    .boxed()
+                });
             runner.wait_for_all_tasks(rx, 2).await;
         });
     }
@@ -671,7 +622,8 @@ mod tests {
 
         smol::run(async move {
             let mut conn = runner.connection().await.unwrap();
-            runner.get_single_async_job(tx.clone(), move |_| async move { Ok(()) }.boxed());
+            runner
+                .get_single_async_job(tx.clone(), move |_| async move { Ok(()) }.boxed());
             runner.wait_for_all_tasks(rx, 1).await;
             let remaining_jobs = get_job_count(&mut conn).await;
             assert_eq!(0, remaining_jobs);
