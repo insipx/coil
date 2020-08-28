@@ -24,7 +24,7 @@ use sqlx::Postgres;
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe, PanicInfo, RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use std::time::Duration;
 
 /// Builder pattern struct for the Runner
@@ -38,6 +38,7 @@ pub struct Builder<Env> {
     on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
     /// Amount of time to wait until job is deemed a failure
     timeout: Option<Duration>,
+    keep_queue_constant: Option<Arc<AtomicUsize>>,
 }
 
 impl<Env: 'static> Builder<Env> {
@@ -52,6 +53,7 @@ impl<Env: 'static> Builder<Env> {
             registry: Registry::load(),
             on_finish: None,
             timeout: None,
+            keep_queue_constant: None,
         }
     }
 
@@ -91,6 +93,17 @@ impl<Env: 'static> Builder<Env> {
         self.max_tasks = Some(max_tasks);
         self
     }
+    
+    /// Make sure the number of items in the queue
+    /// never exceeds `max_tasks`
+    /// 
+    /// # Note
+    /// This may mean less items are kept in the queue at any given time. 
+    /// It is guaranteed, however, that `self.max_tasks` items is not exceeded.
+    pub fn keep_queue_constant(mut self) -> Self {
+        self.keep_queue_constant = Some(Arc::new(AtomicUsize::new(0)));
+        self
+    }
 
     /// Provide a hook that runs after a job has finished and all destructors have run
     /// the `on_finish` closure accepts the job ID that finished as an argument
@@ -127,6 +140,7 @@ impl<Env: 'static> Builder<Env> {
             environment: Arc::new(self.environment),
             registry: Arc::new(self.registry),
             max_tasks,
+            keep_queue_constant: self.keep_queue_constant,
             on_finish: self.on_finish,
             timeout,
         })
@@ -144,6 +158,7 @@ pub struct Runner<Env> {
     registry: Arc<Registry<Env>>,
     /// maximum number of tasks to run at any one time
     max_tasks: usize,
+    keep_queue_constant: Option<Arc<AtomicUsize>>,
     on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
     timeout: Duration,
 }
@@ -224,6 +239,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 fun(tx.clone());
             }
             pending_messages += jobs_to_queue;
+            log::info!("Queueing: {}, {:?} in queue", jobs_to_queue, self.keep_queue_constant);
             let mut timeout = timer::Delay::new(self.timeout).fuse();
             let mut next_msg = rx.next().fuse();
             futures::select! {
@@ -282,6 +298,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     {
         let pg_pool = self.pg_pool.clone();
         let finish_hook = self.on_finish.clone();
+        let queue_size = self.keep_queue_constant.clone();
         let _ = self.executor.spawn(async move {
             let run = || -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>> {
                 async move {
@@ -295,7 +312,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     // TODO: Need to decide how or if we should handle panics in futures. Wrap with catch_unwind?
                     // Since we require the `Spawn` trait, the task executor should handle panics, not us?
                     // However, since we _dont_ handle panics, retry_counter won't be updated
-                    Self::finish_work(fun(job).await, transaction, job_id, finish_hook).await;
+                    Self::finish_work(fun(job).await, transaction, job_id, queue_size.as_ref(), finish_hook).await;
                     Ok(())
                 }
                 .boxed()
@@ -315,6 +332,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     {
         let pg_pool = self.pg_pool.clone();
         let finish_hook = self.on_finish.clone();
+        let queue_size = self.keep_queue_constant.clone();
         self.threadpool.spawn_fifo(move || {
             let res = move || -> Result<(), PerformError> {
                 let (transaction, job) =
@@ -327,7 +345,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 let result = catch_unwind(|| fun(job))
                     .map_err(|e| try_to_extract_panic_info(&e))
                     .and_then(|r| r);
-                block_on(Self::finish_work(result, transaction, job_id, finish_hook));
+                block_on(Self::finish_work(result, transaction, job_id, queue_size.as_ref(), finish_hook));
                 Ok(())
             };
 
@@ -371,6 +389,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         res: Result<(), PerformError>,
         mut trx: sqlx::Transaction<'static, Postgres>,
         job_id: i64,
+        queue_size: Option<&Arc<AtomicUsize>>,
         on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
     ) {
         match res {
@@ -389,10 +408,12 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         }
 
         trx.commit().await.expect("Failed to commit transaction");
-
-       if let Some(f) = on_finish {
+        if let Some(q) = queue_size {
+            q.fetch_sub(1, Ordering::Relaxed);
+        } 
+        if let Some(f) = on_finish {
             f(job_id)
-       }
+        }
     }
 }
 
