@@ -38,7 +38,7 @@ pub enum Error {
     Spawn(#[from] futures::task::SpawnError),
     /// Error occured while trying to run the migrations for coil
     #[error("Migrations could not be run {0}")]
-    Migrate(#[from] sqlx::migrate::MigrateError)
+    Migrate(#[from] sqlx::migrate::MigrateError),
 }
 
 #[derive(Debug, Error)]
@@ -48,7 +48,7 @@ pub enum FetchError {
     #[error("Timeout reached while waiting for worker to finish")]
     Timeout,
     #[error("Couldn't load job from storage {0}")]
-    FailedLoadingJob(#[from] sqlx::Error)
+    FailedLoadingJob(#[from] sqlx::Error),
 }
 
 #[derive(Debug, Error)]
@@ -58,7 +58,7 @@ pub enum EnqueueError {
     Sql(#[from] sqlx::Error),
     /// Error encoding job arguments
     #[error("Error encoding task for insertion {0}")]
-    Encode(#[from] rmp_serde::encode::Error)
+    Encode(#[from] rmp_serde::encode::Error),
 }
 
 /// Catch-all error for jobs
@@ -71,6 +71,6 @@ pub enum FailedJobsError {
     /// Jobs that failed to run
     JobsFailed(
         /// Number of failed jobs
-        i64
+        i64,
     ),
 }

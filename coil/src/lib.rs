@@ -22,40 +22,38 @@
 //! - SQL queries in `coil` are ran asynchronously wherever possible
 //! - Migrations are stored in the binary, and accessible via a `migrate()` fn. No more needing to copy-paste migration files!
 
-
-mod error;
 mod db;
-mod registry;
+mod error;
 mod job;
+mod registry;
 mod runner;
 
 #[doc(hidden)]
-pub extern crate serde;
+pub extern crate async_trait;
 #[doc(hidden)]
 pub extern crate inventory;
 #[doc(hidden)]
-pub extern crate async_trait;
+pub extern crate serde;
 #[doc(hidden)]
 pub extern crate sqlx;
 #[doc(hidden)]
-pub use serde::{Deserialize, Serialize, de::DeserializeOwned};
+pub use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[doc(hidden)]
 pub use registry::JobVTable;
 
-pub use crate::job::*;
-pub use crate::error::*;
 pub use crate::db::migrate;
-pub use coil_proc_macro::*;
-pub use crate::runner::{Runner, Builder};
+pub use crate::error::*;
+pub use crate::job::*;
 #[cfg(any(test, feature = "test_components"))]
 pub use crate::runner::Event;
+pub use crate::runner::{Builder, Runner};
+pub use coil_proc_macro::*;
 
-
-#[cfg(test)]
-use std::sync::Once;
 #[cfg(test)]
 use sqlx::Connection;
+#[cfg(test)]
+use std::sync::Once;
 #[cfg(test)]
 static INIT: Once = Once::new();
 

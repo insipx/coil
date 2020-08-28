@@ -15,14 +15,13 @@
 // along with coil.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::error::{EnqueueError, PerformError};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 use sqlx::{Executor, Postgres};
 use std::sync::Arc;
 
 /// Background job
 #[async_trait::async_trait]
 pub trait Job: Serialize + DeserializeOwned {
-
     ///  The environment this job is run with.
     ///  This is a struct you define,
     ///  which should encapsulate things like database connection pools,
@@ -38,20 +37,26 @@ pub trait Job: Serialize + DeserializeOwned {
     const ASYNC: bool;
 
     /// inserts the job into the Postgres Database
-    async fn enqueue<'a, C>(self, conn: C) -> Result<(), EnqueueError> where C: Executor<'a, Database = Postgres> {
+    async fn enqueue<'a, C>(self, conn: C) -> Result<(), EnqueueError>
+    where
+        C: Executor<'a, Database = Postgres>,
+    {
         crate::db::enqueue_job(conn, self).await
     }
-    
+
     /// Logic for running a synchronous job
-    #[doc(hidden)] 
-    fn perform(self, _: &Self::Environment, _: &sqlx::PgPool) -> Result<(), PerformError>
-    {
+    #[doc(hidden)]
+    fn perform(self, _: &Self::Environment, _: &sqlx::PgPool) -> Result<(), PerformError> {
         panic!("Running Sync job when it should be async!");
     }
-    
+
     /// Logic for running an asynchronous job
-    #[doc(hidden)] 
-    async fn perform_async(self, _: Arc<Self::Environment>, _: &sqlx::PgPool) -> Result<(), PerformError> {
+    #[doc(hidden)]
+    async fn perform_async(
+        self,
+        _: Arc<Self::Environment>,
+        _: &sqlx::PgPool,
+    ) -> Result<(), PerformError> {
         panic!("Running Async job when it should be sync!");
     }
 }

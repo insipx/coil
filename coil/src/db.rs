@@ -78,19 +78,19 @@ pub async fn find_next_unlocked_job(
             WHERE is_async = $1
             ORDER BY id FOR UPDATE SKIP LOCKED",
         )
-            .bind(a)
-            .fetch_optional(conn)
-            .await
-            .map_err(Into::into)
+        .bind(a)
+        .fetch_optional(conn)
+        .await
+        .map_err(Into::into)
     } else {
         sqlx::query_as::<_, BackgroundJob>(
             "SELECT id, job_type, data, is_async
              FROM _background_tasks
-             ORDER BY id FOR UPDATE SKIP LOCKED"
+             ORDER BY id FOR UPDATE SKIP LOCKED",
         )
-            .fetch_optional(conn)
-            .await
-            .map_err(Into::into)
+        .fetch_optional(conn)
+        .await
+        .map_err(Into::into)
     }
 }
 
@@ -128,8 +128,12 @@ pub async fn unlocked_tasks_count(conn: impl Executor<'_, Database = Postgres>, 
 */
 /// Gets jobs which failed
 #[cfg(any(test, feature = "test_components"))]
-pub async fn failed_job_count(conn: impl Executor<'_, Database = Postgres>) -> Result<i64, sqlx::Error> {
-    let count = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM _background_tasks WHERE retries > 0")
-        .fetch_one(conn).await?;
+pub async fn failed_job_count(
+    conn: impl Executor<'_, Database = Postgres>,
+) -> Result<i64, sqlx::Error> {
+    let count =
+        sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM _background_tasks WHERE retries > 0")
+            .fetch_one(conn)
+            .await?;
     Ok(count.0)
 }

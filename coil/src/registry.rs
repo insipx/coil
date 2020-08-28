@@ -15,15 +15,15 @@
 
 #![allow(clippy::new_without_default)] // https://github.com/rust-lang/rust-clippy/issues/3632
 
+use crate::error::PerformError;
+use crate::job::Job;
+use futures::{Future, FutureExt};
+use sqlx::PgPool;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use futures::{Future, FutureExt};
-use crate::error::PerformError;
-use crate::job::Job;
 use std::pin::Pin;
 use std::sync::Arc;
-use sqlx::PgPool;
 
 #[derive(Default)]
 #[allow(missing_debug_implementations)] // Can't derive debug
@@ -35,9 +35,8 @@ pub struct Registry<Env> {
 }
 
 impl<Env: 'static> Registry<Env> {
-    
     pub fn register_job<T: Job + 'static + Send>(&mut self) {
-        if  TypeId::of::<T::Environment>() == TypeId::of::<Env>() {
+        if TypeId::of::<T::Environment>() == TypeId::of::<Env>() {
             self.jobs.insert(T::JOB_TYPE, JobVTable::from_job::<T>());
         } else {
             log::warn!("could not register job {}", T::JOB_TYPE);
@@ -83,12 +82,17 @@ macro_rules! register_job {
 #[derive(Copy, Clone)]
 enum SyncOrAsync {
     Sync {
-        fun: fn(Vec<u8>, &dyn Any, &PgPool) -> Result<(), PerformError>
+        fun: fn(Vec<u8>, &dyn Any, &PgPool) -> Result<(), PerformError>,
     },
     #[allow(clippy::type_complexity)]
     Async {
-        fun: for<'a> fn(Vec<u8>, Arc<(dyn Any + Send + Sync)>, &'a PgPool) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>
-    }
+        fun: for<'a> fn(
+            Vec<u8>,
+            Arc<(dyn Any + Send + Sync)>,
+            &'a PgPool,
+        )
+            -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>>,
+    },
 }
 
 #[doc(hidden)]
@@ -121,7 +125,7 @@ impl JobVTable {
 
     pub fn is_async(&self) -> bool {
         match self.perform {
-            SyncOrAsync::Sync {..} => false,
+            SyncOrAsync::Sync { .. } => false,
             SyncOrAsync::Async { .. } => true,
         }
     }
@@ -144,19 +148,22 @@ fn perform_sync_job<T: Job>(
 fn perform_async_job<'a, T: 'static + Job + Send>(
     data: Vec<u8>,
     env: Arc<(dyn Any + Sync + Send)>,
-    conn: &'a PgPool
+    conn: &'a PgPool,
 ) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>> {
     async move {
         let environment = match env.downcast() {
             Ok(t) => t,
             Err(_) => {
-                return Err(PerformError::from("Incorrect environment type. This should never happen. \
-             Please open an issue at https://github.com/paritytech/coil/issues/new"))
+                return Err(PerformError::from(
+                    "Incorrect environment type. This should never happen. \
+             Please open an issue at https://github.com/paritytech/coil/issues/new",
+                ))
             }
         };
         let data = rmp_serde::from_read(data.as_slice())?;
         T::perform_async(data, environment, conn).await
-    }.boxed()
+    }
+    .boxed()
 }
 
 pub struct PerformJob<Env> {
@@ -165,7 +172,6 @@ pub struct PerformJob<Env> {
 }
 
 impl<Env: 'static + Send + Sync> PerformJob<Env> {
-    
     /// Perform a job in a synchronous way.
     ///
     /// # Blocks
@@ -177,30 +183,28 @@ impl<Env: 'static + Send + Sync> PerformJob<Env> {
         conn: &PgPool,
     ) -> Result<(), PerformError> {
         match self.vtable.perform {
-            SyncOrAsync::Sync { fun } => {
-                fun(data, env, conn)
-            },
+            SyncOrAsync::Sync { fun } => fun(data, env, conn),
             SyncOrAsync::Async { .. } => {
                 panic!("Not Async");
             }
         }
     }
-    
+
     /// Perform a job in an asynchronous way
     ///
     /// # Blocks
     /// If the underlying job is synchronous, this method will block
     pub fn perform_async<'a>(
         &self,
-        data: Vec<u8>, env: Arc<Env>, conn: &'a PgPool
+        data: Vec<u8>,
+        env: Arc<Env>,
+        conn: &'a PgPool,
     ) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send + 'a>> {
         match self.vtable.perform {
             SyncOrAsync::Sync { .. } => {
                 panic!("Not Sync");
-            },
-            SyncOrAsync::Async { fun } => {
-                fun(data, env, conn)
             }
+            SyncOrAsync::Async { fun } => fun(data, env, conn),
         }
     }
 }
