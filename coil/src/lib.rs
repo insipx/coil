@@ -27,6 +27,7 @@ mod error;
 mod job;
 mod registry;
 mod runner;
+mod batch;
 
 #[doc(hidden)]
 pub extern crate async_trait;

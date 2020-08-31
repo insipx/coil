@@ -63,6 +63,34 @@ pub async fn enqueue_job<T: Job>(
     Ok(())
 }
 
+pub async fn enqueue_jobs_batch<T: Job>(conn: &mut sqlx::PgConnection, jobs: Vec<T>) -> Result<(), EnqueueError> {
+    let mut batch = crate::batch::Batch::new(
+        "jobs",
+         r#"INSERT INTO "_background_tasks" (
+            job_type, data, is_async
+        ) VALUES
+         "#,
+         r#""#
+    );
+     
+    for job in jobs.into_iter() {
+        let data = rmp_serde::encode::to_vec(&job)?;
+        batch.reserve(3)?;
+        if batch.current_num_arguments() > 0 {
+            batch.append(",");
+        }
+        batch.append("(");
+        batch.bind(T::JOB_TYPE)?;
+        batch.append(",");
+        batch.bind(data)?;
+        batch.append(",");
+        batch.bind(T::ASYNC)?;
+        batch.append(")");
+    }
+    batch.execute(conn).await?;
+    Ok(())
+}
+
 /// Get the next unlocked job.
 /// Optionally pass a boolean to specify whether to get the next unlocked synchronous or
 /// asynchronous job.

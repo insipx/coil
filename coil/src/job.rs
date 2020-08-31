@@ -60,3 +60,13 @@ pub trait Job: Serialize + DeserializeOwned {
         panic!("Running Async job when it should be sync!");
     }
 }
+
+#[async_trait::async_trait]
+pub trait JobExt: Job {
+    async fn enqueue_batch(data: Vec<Self>, conn: &mut sqlx::PgConnection) -> Result<(), EnqueueError>
+    {
+        crate::db::enqueue_jobs_batch(conn, data).await
+    }
+}
+
+impl<T> JobExt for T where T: Job {}

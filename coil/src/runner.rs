@@ -24,10 +24,7 @@ use sqlx::Postgres;
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe, PanicInfo, RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Builder pattern struct for the Runner

@@ -59,6 +59,16 @@ pub enum EnqueueError {
     /// Error encoding job arguments
     #[error("Error encoding task for insertion {0}")]
     Encode(#[from] rmp_serde::encode::Error),
+    #[error("Error enqueuing batch tasks")]
+    Batch(#[from] BatchInsertError)
+}
+
+#[derive(Debug, Error)]
+pub enum BatchInsertError {
+    #[error("Error converting between integer and ascii")]
+    Itoa(#[from] std::fmt::Error),
+    #[error("Error inserting task {0}")]
+    Sql(#[from] sqlx::Error),
 }
 
 /// Catch-all error for jobs
