@@ -49,6 +49,23 @@ pub async fn migrate(pool: impl Acquire<'_, Database = Postgres>) -> Result<(), 
         .map_err(Into::into)
 }
 
+#[cfg(feature = "analyze")]
+pub async fn enqueue_job<T: Job>(
+    conn: impl Executor<'_, Database = Postgres>,
+    job: T,
+) -> Result<(), EnqueueError> {
+    let data = rmp_serde::encode::to_vec(&job)?;
+    let res = sqlx::query_as::<_, (String,)>("EXPLAIN (ANALYZE, BUFFERS) INSERT INTO _background_tasks (job_type, data, is_async) VALUES ($1, $2, $3)")
+        .bind(T::JOB_TYPE)
+        .bind(data)
+        .bind(T::ASYNC)
+        .fetch_one(conn)
+        .await?;
+    log::debug!("{:?}", res);
+    Ok(())
+}
+
+#[cfg(not(feature = "analyze"))]
 pub async fn enqueue_job<T: Job>(
     conn: impl Executor<'_, Database = Postgres>,
     job: T,
