@@ -61,7 +61,7 @@ pub async fn enqueue_job<T: Job>(
         .bind(T::ASYNC)
         .fetch_one(conn)
         .await?;
-    log::debug!("{:?}", res);
+    log::debug!("EXPLAIN/ANALYZE {:?}", res);
     Ok(())
 }
 
