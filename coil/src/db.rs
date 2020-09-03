@@ -28,7 +28,7 @@ pub struct BackgroundJob {
     pub data: Vec<u8>,
     pub is_async: bool,
 }
-
+  
 /// Run the migrations for the background tasks.
 /// This creates a table _background_tasks which stores the tasks for execution
 /// ```sql
@@ -48,20 +48,20 @@ pub async fn migrate(pool: impl Acquire<'_, Database = Postgres>) -> Result<(), 
         .await
         .map_err(Into::into)
 }
-
+  
 #[cfg(feature = "analyze")]
 pub async fn enqueue_job<T: Job>(
     conn: impl Executor<'_, Database = Postgres>,
     job: T,
 ) -> Result<(), EnqueueError> {
     let data = rmp_serde::encode::to_vec(&job)?;
-    let res = sqlx::query_as::<_, (String,)>("EXPLAIN (ANALYZE, BUFFERS) INSERT INTO _background_tasks (job_type, data, is_async) VALUES ($1, $2, $3)")
+    let res = sqlx::query_as::<_, (sqlx::types::Json<serde_json::Value>,)>("EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS) INSERT INTO _background_tasks (job_type, data, is_async) VALUES ($1, $2, $3)")
         .bind(T::JOB_TYPE)
         .bind(data)
         .bind(T::ASYNC)
         .fetch_one(conn)
         .await?;
-    log::debug!("EXPLAIN/ANALYZE {:?}", res);
+    log::debug!("EXPLAIN/ANALYZE {}", serde_json::to_string_pretty(&res.0.0).unwrap());
     Ok(())
 }
 
