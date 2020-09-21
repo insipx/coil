@@ -387,7 +387,8 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     .expect("Panic is mapped");
             }
             Err(e) => {
-                eprintln!("Job {} failed to run: {}", job_id, e);
+                // TODO: Fix killing the execution
+                // eprintln!("Job {} failed to run: {}", job_id, e);
                 db::update_failed_job(&mut trx, job_id)
                     .await
                     .expect(&format!("failed to update failed job: {:?}", e));
