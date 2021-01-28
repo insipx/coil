@@ -82,7 +82,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 const JOB_TYPE: &'static str = stringify!(#name);
                 const ASYNC: bool = #is_async;
 
-                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
+                #fn_token perform(self, #env_pat: &'static Self::Environment, #pool_pat: &#pool_ty) #return_type {
                     let Self { #(#arg_names_1),* } = self;
                     #body
                 }
@@ -222,13 +222,13 @@ impl BackgroundJob {
         if !sig.generics.params.is_empty() {
             generics_exist = true;
         }
-    /*
-        if let Some(where_clause) = sig.generics.where_clause {
-            return Err(where_clause.where_token.span.error(
-                "#[coil::background_job] cannot be used on functions with a where clause",
-            ));
-        }
-    */
+        /*
+            if let Some(where_clause) = sig.generics.where_clause {
+                return Err(where_clause.where_token.span.error(
+                    "#[coil::background_job] cannot be used on functions with a where clause",
+                ));
+            }
+        */
         let fn_token = sig.fn_token;
         let return_type = sig.output.clone();
         let ident = sig.ident.clone();
@@ -245,7 +245,7 @@ impl BackgroundJob {
             body: block.stmts,
             is_async,
             generics,
-            generics_exist
+            generics_exist,
         })
     }
 }
@@ -394,7 +394,8 @@ impl ConnectionArg {
     }
 
     fn is_connection_arg(ty: &syn::Type) -> bool {
-       /* Self::is_single_connection(ty) ||*/ Self::is_pool(ty)
+        /* Self::is_single_connection(ty) ||*/
+        Self::is_pool(ty)
     }
 
     fn from_arg(pat: Box<syn::Pat>, ty: Box<syn::Type>) -> Self {
