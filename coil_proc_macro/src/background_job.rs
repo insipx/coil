@@ -150,7 +150,7 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 const JOB_TYPE: &'static str = stringify!(#name);
                 const ASYNC: bool = #is_async;
 
-                #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
+                #fn_token perform(self, #env_pat: &'static Self::Environment, #pool_pat: &#pool_ty) #return_type {
                     let Self { #(#arg_names_1),* } = self;
                     #body
                 }
