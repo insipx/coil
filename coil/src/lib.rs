@@ -22,12 +22,15 @@
 //! - SQL queries in `coil` are ran asynchronously wherever possible
 //! - Migrations are stored in the binary, and accessible via a `migrate()` fn. No more needing to copy-paste migration files!
 
+#![forbid(unsafe_code)]
+#![deny(dead_code)]
+
+mod batch;
 mod db;
 mod error;
 mod job;
 mod registry;
 mod runner;
-mod batch;
 
 #[doc(hidden)]
 pub extern crate async_trait;

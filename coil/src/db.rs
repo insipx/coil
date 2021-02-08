@@ -28,7 +28,7 @@ pub struct BackgroundJob {
     pub data: Vec<u8>,
     pub is_async: bool,
 }
-  
+
 /// Run the migrations for the background tasks.
 /// This creates a table _background_tasks which stores the tasks for execution
 /// ```sql
@@ -48,7 +48,7 @@ pub async fn migrate(pool: impl Acquire<'_, Database = Postgres>) -> Result<(), 
         .await
         .map_err(Into::into)
 }
-  
+
 #[cfg(feature = "analyze")]
 pub async fn enqueue_job<T: Job>(
     conn: impl Executor<'_, Database = Postgres>,
@@ -61,7 +61,10 @@ pub async fn enqueue_job<T: Job>(
         .bind(T::ASYNC)
         .fetch_one(conn)
         .await?;
-    log::debug!("EXPLAIN/ANALYZE {}", serde_json::to_string_pretty(&res.0.0).unwrap());
+    log::debug!(
+        "EXPLAIN/ANALYZE {}",
+        serde_json::to_string_pretty(&res.0 .0).unwrap()
+    );
     Ok(())
 }
 
@@ -80,16 +83,19 @@ pub async fn enqueue_job<T: Job>(
     Ok(())
 }
 
-pub async fn enqueue_jobs_batch<T: Job>(conn: &mut sqlx::PgConnection, jobs: Vec<T>) -> Result<(), EnqueueError> {
+pub async fn enqueue_jobs_batch<T: Job>(
+    conn: &mut sqlx::PgConnection,
+    jobs: Vec<T>,
+) -> Result<(), EnqueueError> {
     let mut batch = crate::batch::Batch::new(
         "jobs",
-         r#"INSERT INTO "_background_tasks" (
+        r#"INSERT INTO "_background_tasks" (
             job_type, data, is_async
         ) VALUES
          "#,
-         r#""#
+        r#""#,
     );
-     
+
     for job in jobs.into_iter() {
         let data = rmp_serde::encode::to_vec(&job)?;
         batch.reserve(3)?;
@@ -162,15 +168,7 @@ pub async fn update_failed_job(
     .await?;
     Ok(())
 }
-/*
-pub async fn unlocked_tasks_count(conn: impl Executor<'_, Database = Postgres>, is_async: bool) -> Result<i64, EnqueueError> {
-    let count = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM _background_tasks WHERE is_async = $1")
-        .bind(is_async)
-        .fetch_one(conn)
-        .await?;
-    Ok(count.0)
-}
-*/
+
 /// Gets jobs which failed
 #[cfg(any(test, feature = "test_components"))]
 pub async fn failed_job_count(
