@@ -1,0 +1,13 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    # Handle updates for crates from github.com/paritytech/substrate
+    # and github.com/paritytech/polkadot manually.
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
