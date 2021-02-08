@@ -9,7 +9,7 @@ autotests = false
 
 [dependencies]
 coil = { path = "../coil", features = ["test_components"] }
-sqlx = { version = "0.4.0-beta.1", features = ["postgres"] }
+sqlx = { version = "0.5", default-features = false, features = ["postgres", "macros", "runtime-async-std-rustls", "migrate"] }
 serde = { version = "1.0", features = ["derive"] }
 smol = "0.3.3"
 futures = "0.3.5"

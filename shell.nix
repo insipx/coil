@@ -2,7 +2,7 @@ let
   moz_overlay = (import "/home/insipx/.config/nixpkgs/overlays/rust-overlay.nix");
   nixpkgs = import <nixpkgs> { overlays = [ moz_overlay ]; };
   unstable = import (fetchTarball "channel:nixos-unstable") {};
-  rustnightly = ((nixpkgs.rustChannelOf { date = "2020-08-17"; channel = "nightly"; }).rust.override { extensions = [ "rust-src" "rust-analysis" "rustfmt-preview" ]; targets = ["wasm32-unknown-unknown"]; });
+  rustnightly = ((nixpkgs.rustChannelOf { date = "2021-01-31"; channel = "nightly"; }).rust.override { extensions = [ "rust-src" "rust-analysis" "rustfmt-preview" ]; targets = ["wasm32-unknown-unknown"]; });
 
 in
   with nixpkgs;
