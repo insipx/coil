@@ -18,7 +18,7 @@ edition = "2018"
 sqlx = { version = "0.5", default-features = false, features = ["postgres", "macros", "runtime-async-std-rustls", "migrate"] }
 rayon = "1.3"
 serde = "1.0"
-rmp-serde = "0.14"
+rmp-serde = "0.15"
 thiserror = "1.0"
 inventory = "0.1"
 coil_proc_macro = "0.2.0"
