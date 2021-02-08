@@ -60,7 +60,7 @@ pub enum EnqueueError {
     #[error("Error encoding task for insertion {0}")]
     Encode(#[from] rmp_serde::encode::Error),
     #[error("Error enqueuing batch tasks")]
-    Batch(#[from] BatchInsertError)
+    Batch(#[from] BatchInsertError),
 }
 
 #[derive(Debug, Error)]

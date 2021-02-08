@@ -44,3 +44,4 @@ jobs:
           # Tests get the pg url from the environment directly
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
           RUST_LOG: info
+          SMOL_THREADS: 2

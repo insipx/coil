@@ -486,7 +486,7 @@ mod tests {
             &self,
             future: futures::task::FutureObj<'static, ()>,
         ) -> Result<(), futures::task::SpawnError> {
-            smol::Task::spawn(future).detach();
+            smol::spawn(future).detach();
             Ok(())
         }
     }
@@ -554,7 +554,7 @@ mod tests {
             smol::block_on(tx0.send(Event::Dummy)).unwrap();
         }));
 
-        smol::run(async move {
+        smol::block_on(async move {
             runner.get_single_async_job(tx.clone(), move |job| {
                 async move {
                     fetch_barrier.0.wait();
@@ -626,7 +626,7 @@ mod tests {
         }));
         create_dummy_job(&runner, true);
 
-        smol::run(async move {
+        smol::block_on(async move {
             let mut conn = runner.connection().await.unwrap();
             runner.get_single_async_job(tx.clone(), move |_| async move { Ok(()) }.boxed());
             runner.wait_for_all_tasks(rx, 1).await;

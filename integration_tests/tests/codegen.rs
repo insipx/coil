@@ -17,14 +17,23 @@ fn generated_jobs_serialize_all_arguments_except_first() {
     }
 
     let (runner, rx) = TestGuard::runner("a".to_string(), 2);
-    smol::run(async {
+    smol::block_on(async {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
-        check_arg_equal_to_env("a".into()).enqueue(&mut conn).await.unwrap();
-        check_arg_equal_to_env("b".into()).enqueue(&mut conn).await.unwrap();
+        check_arg_equal_to_env("a".into())
+            .enqueue(&mut conn)
+            .await
+            .unwrap();
+        check_arg_equal_to_env("b".into())
+            .enqueue(&mut conn)
+            .await
+            .unwrap();
         runner.run_all_sync_tasks().await.unwrap();
     });
 
-    assert_eq!(Err(JobsFailed(1)), smol::block_on(runner.check_for_failed_jobs(rx, 2)));
+    assert_eq!(
+        Err(JobsFailed(1)),
+        smol::block_on(runner.check_for_failed_jobs(rx, 2))
+    );
 }
 
 #[test]
@@ -39,15 +48,20 @@ fn jobs_with_args_but_no_env() {
     }
 
     let (runner, rx) = TestGuard::dummy_runner();
-    smol::run(async {
+    smol::block_on(async {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
         assert_foo("foo".into()).enqueue(&mut conn).await.unwrap();
-        assert_foo("not foo".into()).enqueue(&mut conn).await.unwrap();
+        assert_foo("not foo".into())
+            .enqueue(&mut conn)
+            .await
+            .unwrap();
         runner.run_all_sync_tasks().await.unwrap();
     });
-    assert_eq!(Err(JobsFailed(1)), smol::block_on(runner.check_for_failed_jobs(rx, 2)));
+    assert_eq!(
+        Err(JobsFailed(1)),
+        smol::block_on(runner.check_for_failed_jobs(rx, 2))
+    );
 }
-
 
 #[test]
 fn env_can_have_any_name() {
@@ -58,7 +72,7 @@ fn env_can_have_any_name() {
     }
 
     let (runner, rx) = TestGuard::runner(String::from("my environment"), 1);
-    smol::run(async {
+    smol::block_on(async {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
         env_with_different_name().enqueue(&mut conn).await.unwrap();
 
@@ -66,7 +80,6 @@ fn env_can_have_any_name() {
         runner.check_for_failed_jobs(rx, 1).await.unwrap();
     })
 }
-
 
 #[test]
 #[forbid(unused_imports)]
@@ -83,7 +96,7 @@ fn test_imports_only_used_in_job_body_are_not_warned_as_unused() {
     }
 
     let (runner, rx) = TestGuard::dummy_runner();
-    smol::run(async {
+    smol::block_on(async {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
         uses_trait_import().enqueue(&mut conn).await.unwrap();
 
@@ -91,7 +104,6 @@ fn test_imports_only_used_in_job_body_are_not_warned_as_unused() {
         runner.check_for_failed_jobs(rx, 1).await.unwrap();
     });
 }
-
 
 #[test]
 fn jobs_can_take_a_connection_as_an_argument() {
@@ -126,12 +138,15 @@ fn jobs_can_take_a_connection_as_an_argument() {
     }
 
     let (runner, rx) = TestGuard::dummy_runner();
-    smol::run(async {
+    smol::block_on(async {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
         takes_env_and_conn().enqueue(&mut conn).await.unwrap();
         takes_env_and_conn_sync().enqueue(&mut conn).await.unwrap();
         takes_just_pool().enqueue(&mut conn).await.unwrap();
-        takes_fully_qualified_pool().enqueue(&mut conn).await.unwrap();
+        takes_fully_qualified_pool()
+            .enqueue(&mut conn)
+            .await
+            .unwrap();
 
         runner.run_all_sync_tasks().await.unwrap();
         runner.run_all_async_tasks().await.unwrap();
@@ -140,31 +155,33 @@ fn jobs_can_take_a_connection_as_an_argument() {
     });
 }
 
-
 #[test]
 fn proc_macro_accepts_arbitrary_where_clauses() {
-
     #[coil::background_job]
-    fn can_specify_where_clause<S>(_eng: &(), arg: S) -> Result<(), coil::PerformError> 
+    fn can_specify_where_clause<S>(_eng: &(), arg: S) -> Result<(), coil::PerformError>
     where
-        S: Serialize + DeserializeOwned + std::fmt::Display
+        S: Serialize + DeserializeOwned + std::fmt::Display,
     {
-         arg.to_string();
+        arg.to_string();
         Ok(())
     }
-    
+
     let (tx, rx) = channel::bounded(1);
     let runner = TestGuard::builder(())
         .register_job::<can_specify_where_clause::Job<String>>()
-        .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)).unwrap(); })
+        .on_finish(move |_| {
+            let _ = smol::block_on(tx.send(coil::Event::Dummy)).unwrap();
+        })
         .build();
-    
+
     smol::block_on(async {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
-        can_specify_where_clause("hello".to_string()).enqueue(&mut conn).await.unwrap();
+        can_specify_where_clause("hello".to_string())
+            .enqueue(&mut conn)
+            .await
+            .unwrap();
 
         runner.run_all_sync_tasks().await.unwrap();
         runner.check_for_failed_jobs(rx, 1).await.unwrap();
     });
 }
-

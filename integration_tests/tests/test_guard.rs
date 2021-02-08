@@ -1,9 +1,9 @@
 use antidote::{Mutex, MutexGuard};
-use std::ops::{Deref, DerefMut};
-use std::time::Duration;
 use coil::{Builder, Runner};
 use once_cell::sync::Lazy;
 use sqlx::Connection;
+use std::ops::{Deref, DerefMut};
+use std::time::Duration;
 // Since these tests deal with behavior concerning multiple connections
 // running concurrently, they have to run outside of a transaction.
 // Therefore we can't run more than one at a time.
@@ -22,7 +22,8 @@ impl<'a, Env> TestGuard<'a, Env> {
         let pg_pool = sqlx::postgres::PgPoolOptions::new()
             .min_connections(10)
             .idle_timeout(std::time::Duration::from_millis(1000))
-            .connect_lazy(&crate::DATABASE_URL).unwrap();
+            .connect_lazy(&crate::DATABASE_URL)
+            .unwrap();
         let builder = Runner::builder(env, crate::Executor, &pg_pool);
         GuardBuilder { builder }
     }
@@ -30,22 +31,30 @@ impl<'a, Env> TestGuard<'a, Env> {
     pub fn runner(env: Env, tasks: usize) -> (Self, channel::Receiver<coil::Event>) {
         let (tx, rx) = channel::bounded(tasks);
 
-        (Self::builder(env)
-         .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)); })
-         .num_threads(4)
-         .build(),
-         rx)
+        (
+            Self::builder(env)
+                .on_finish(move |_| {
+                    let _ = smol::block_on(tx.send(coil::Event::Dummy));
+                })
+                .num_threads(4)
+                .build(),
+            rx,
+        )
     }
 }
 
 impl<'a> TestGuard<'a, ()> {
     pub fn dummy_runner() -> (Self, channel::Receiver<coil::Event>) {
         let (tx, rx) = channel::unbounded();
-        (Self::builder(())
-         .num_threads(4)
-         .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)); })
-         .build(),
-         rx)
+        (
+            Self::builder(())
+                .num_threads(4)
+                .on_finish(move |_| {
+                    let _ = smol::block_on(tx.send(coil::Event::Dummy));
+                })
+                .build(),
+            rx,
+        )
     }
 }
 
