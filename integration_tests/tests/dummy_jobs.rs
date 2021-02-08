@@ -1,8 +1,6 @@
+use crate::sync::Barrier;
 pub use coil::Job;
 use coil::PerformError;
-use crate::sync::Barrier;
-
-
 
 #[coil::background_job]
 pub fn barrier_job(env: &Barrier) -> Result<(), PerformError> {

@@ -1,9 +1,9 @@
-use assert_matches::assert_matches;
 use anyhow::Result;
-use std::thread;
-use std::time::Duration;
+use assert_matches::assert_matches;
 use futures::{future::FutureExt, StreamExt};
 use sqlx::Executor;
+use std::thread;
+use std::time::Duration;
 
 use crate::dummy_jobs::*;
 use crate::sync::Barrier;
@@ -22,15 +22,18 @@ fn run_all_pending_jobs_returns_when_all_jobs_enqueued() -> Result<()> {
         barrier_job().enqueue(&conn).await.unwrap();
         runner.run_all_sync_tasks().await.unwrap();
 
-        let queued_job_count = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM _background_tasks")
-            .fetch_one(&conn)
-            .await.unwrap()
-            .0;
-        let unlocked_job_count = sqlx::query_as::<_, (i64,)>("SELECT id FROM _background_tasks FOR UPDATE SKIP LOCKED")
-            .fetch_all(&conn)
-            .await
-            .unwrap()
-            .len();
+        let queued_job_count =
+            sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM _background_tasks")
+                .fetch_one(&conn)
+                .await
+                .unwrap()
+                .0;
+        let unlocked_job_count =
+            sqlx::query_as::<_, (i64,)>("SELECT id FROM _background_tasks FOR UPDATE SKIP LOCKED")
+                .fetch_all(&conn)
+                .await
+                .unwrap()
+                .len();
 
         assert_eq!(2, queued_job_count);
         assert_eq!(0, unlocked_job_count);
@@ -39,7 +42,6 @@ fn run_all_pending_jobs_returns_when_all_jobs_enqueued() -> Result<()> {
     barrier.wait();
     Ok(())
 }
-
 
 #[test]
 fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<()> {
@@ -66,14 +68,14 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
                 _ = timeout.fuse() => true
             }
         });
-        assert!(
-            res,
-            "wait_for_jobs returned before jobs finished"
-        );
+        assert!(res, "wait_for_jobs returned before jobs finished");
 
         barrier.wait();
 
-        assert!(smol::block_on(rx.recv()).is_ok(), "wait_for_jobs didn't return");
+        assert!(
+            smol::block_on(rx.recv()).is_ok(),
+            "wait_for_jobs didn't return"
+        );
     });
 
     let _ = smol::block_on(runner.check_for_failed_jobs(task_wait, 2));
@@ -81,7 +83,6 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
     handle.join().unwrap();
     Ok(())
 }
-
 
 #[test]
 fn check_for_failed_jobs_panics_if_jobs_failed() -> Result<()> {
@@ -96,7 +97,10 @@ fn check_for_failed_jobs_panics_if_jobs_failed() -> Result<()> {
     })?;
 
     smol::block_on(runner.run_all_sync_tasks())?;
-    assert_eq!(Err(coil::FailedJobsError::JobsFailed(3)), smol::block_on(runner.check_for_failed_jobs(rx, 3)));
+    assert_eq!(
+        Err(coil::FailedJobsError::JobsFailed(3)),
+        smol::block_on(runner.check_for_failed_jobs(rx, 3))
+    );
     Ok(())
 }
 
@@ -127,7 +131,9 @@ fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
     let runner = TestGuard::builder(barrier.clone())
         .num_threads(1)
         .max_tasks(1)
-        .on_finish(move |_| { let _ = smol::block_on(tx.send(coil::Event::Dummy)); })
+        .on_finish(move |_| {
+            let _ = smol::block_on(tx.send(coil::Event::Dummy));
+        })
         .timeout(Duration::from_millis(50))
         .build();
     log::info!("RUNNING `run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout`");
@@ -164,19 +170,23 @@ fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
         })
         .build();
     log::info!("RUNNING `jobs_failing_to_load_doesnt_panic_threads`");
-    smol::run(async {
+    smol::block_on(async {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
         failure_job().enqueue(&mut conn).await.unwrap();
         // Since jobs are loaded with `SELECT FOR UPDATE`, it will always fail in
         // read-only mode
-        conn.execute("SET default_transaction_read_only = on").await.unwrap();
+        conn.execute("SET default_transaction_read_only = on")
+            .await
+            .unwrap();
     });
 
     let run_result = smol::block_on(runner.run_all_sync_tasks());
 
-    smol::run(async {
+    smol::block_on(async {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
-        conn.execute("SET default_transaction_read_only = off").await.unwrap();
+        conn.execute("SET default_transaction_read_only = off")
+            .await
+            .unwrap();
         assert_matches!(run_result, Err(coil::FetchError::FailedLoadingJob(_)));
     });
 

@@ -63,8 +63,10 @@ pub trait Job: Serialize + DeserializeOwned {
 
 #[async_trait::async_trait]
 pub trait JobExt: Job {
-    async fn enqueue_batch(data: Vec<Self>, conn: &mut sqlx::PgConnection) -> Result<(), EnqueueError>
-    {
+    async fn enqueue_batch(
+        data: Vec<Self>,
+        conn: &mut sqlx::PgConnection,
+    ) -> Result<(), EnqueueError> {
         crate::db::enqueue_jobs_batch(conn, data).await
     }
 }
