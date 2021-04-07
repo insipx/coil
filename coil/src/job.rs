@@ -17,7 +17,6 @@
 use crate::error::{EnqueueError, PerformError};
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::{Executor, Postgres};
-use std::sync::Arc;
 
 /// Background job
 #[async_trait::async_trait]
@@ -33,9 +32,6 @@ pub trait Job: Serialize + DeserializeOwned {
     const JOB_TYPE: &'static str;
     #[doc(hidden)]
 
-    /// Marker for whether this trait should be executed with `perform_async`
-    const ASYNC: bool;
-
     /// inserts the job into the Postgres Database
     async fn enqueue<'a, C>(self, conn: C) -> Result<(), EnqueueError>
     where
@@ -48,16 +44,6 @@ pub trait Job: Serialize + DeserializeOwned {
     #[doc(hidden)]
     fn perform(self, _: &Self::Environment, _: &sqlx::PgPool) -> Result<(), PerformError> {
         panic!("Running Sync job when it should be async!");
-    }
-
-    /// Logic for running an asynchronous job
-    #[doc(hidden)]
-    async fn perform_async(
-        self,
-        _: Arc<Self::Environment>,
-        _: &sqlx::PgPool,
-    ) -> Result<(), PerformError> {
-        panic!("Running Async job when it should be sync!");
     }
 }
 

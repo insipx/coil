@@ -21,18 +21,16 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
     let struct_def = job.args.struct_def();
     let struct_assign = job.args.struct_assign();
     let arg_names_0 = job.args.names();
-    let arg_names_1 = job.args.names();
     let return_type = job.return_type;
     let body = connection_arg.wrap(job.body);
     let (impl_generics, ty_generics, where_clause) = job.generics.split_for_impl();
-    let is_async = job.is_async;
 
     // FIXME: this proc-macro needs some love ...
     // I should probably split the `Job Trait` into `Async Job` and `Sync Job`
     // Or leave the Job trait as it is and create two proc macros, one for async and one for sync
     // this if-else chain is ugly.
     // Or maybe there is a better way to accomplish this with proc-macros...
-    let res = if job.generics_exist && job.is_async {
+    let res = if job.generics_exist {
         quote! {
             #(#attrs)*
             #vis #fn_token #name #impl_generics (#(#fn_args),*) -> #name :: Job #ty_generics #where_clause {
@@ -45,45 +43,9 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
             impl #impl_generics coil::Job for #name :: Job #ty_generics #where_clause {
                 type Environment = #env_type;
                 const JOB_TYPE: &'static str = stringify!(#name);
-                const ASYNC: bool = #is_async;
-
-                async #fn_token perform_async(self,
-                    #env_pat: std::sync::Arc<Self::Environment>,
-                    #pool_pat: &#pool_ty
-                    ) #return_type
-                {
-                    let Self { #(#arg_names_0),* } = self;
-                    #body
-                }
-            }
-
-            pub(crate) mod #name {
-                use super::*;
-
-                #[derive(coil::Serialize, coil::Deserialize)]
-                #[serde(crate = "coil::serde")]
-                pub struct Job #ty_generics {
-                    #(#struct_def),*
-                }
-            }
-        }
-    } else if job.generics_exist && !job.is_async {
-        quote! {
-            #(#attrs)*
-            #vis #fn_token #name #impl_generics (#(#fn_args),*) -> #name :: Job #ty_generics #where_clause {
-                #name :: Job {
-                    #(#struct_assign),*
-                }
-            }
-
-            #[coil::async_trait::async_trait]
-            impl #impl_generics coil::Job for #name :: Job #ty_generics #where_clause {
-                type Environment = #env_type;
-                const JOB_TYPE: &'static str = stringify!(#name);
-                const ASYNC: bool = #is_async;
 
                 #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
-                    let Self { #(#arg_names_1),* } = self;
+                    let Self { #(#arg_names_0),* } = self;
                     #body
                 }
             }
@@ -96,43 +58,6 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
                 pub struct Job #ty_generics {
                     #(#struct_def),*
                 }
-            }
-        }
-    } else if !job.generics_exist && job.is_async {
-        quote! {
-            #(#attrs)*
-            #vis #fn_token #name (#(#fn_args),*) -> #name :: Job {
-                #name :: Job {
-                    #(#struct_assign),*
-                }
-            }
-
-            #[coil::async_trait::async_trait]
-            impl coil::Job for #name :: Job {
-                type Environment = #env_type;
-                const JOB_TYPE: &'static str = stringify!(#name);
-                const ASYNC: bool = #is_async;
-
-                async #fn_token perform_async(self,
-                    #env_pat: std::sync::Arc<Self::Environment>,
-                    #pool_pat: &#pool_ty
-                    ) #return_type
-                {
-                    let Self { #(#arg_names_0),* } = self;
-                    #body
-                }
-            }
-
-            pub(crate) mod #name {
-                use super::*;
-
-                #[derive(coil::Serialize, coil::Deserialize)]
-                #[serde(crate = "coil::serde")]
-                pub struct Job {
-                    #(#struct_def),*
-                }
-
-                coil::register_job!(Job);
             }
         }
     } else {
@@ -148,10 +73,9 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
             impl coil::Job for #name :: Job {
                 type Environment = #env_type;
                 const JOB_TYPE: &'static str = stringify!(#name);
-                const ASYNC: bool = #is_async;
 
                 #fn_token perform(self, #env_pat: &Self::Environment, #pool_pat: &#pool_ty) #return_type {
-                    let Self { #(#arg_names_1),* } = self;
+                    let Self { #(#arg_names_0),* } = self;
                     #body
                 }
             }
@@ -174,7 +98,6 @@ pub fn expand(item: syn::ItemFn) -> Result<TokenStream, Diagnostic> {
 }
 
 struct BackgroundJob {
-    is_async: bool,
     attrs: Vec<syn::Attribute>,
     visibility: syn::Visibility,
     fn_token: syn::Token![fn],
@@ -196,7 +119,6 @@ impl BackgroundJob {
         } = item;
 
         let mut generics_exist = false;
-        let mut is_async = false;
         if let Some(constness) = sig.constness {
             return Err(constness
                 .span
@@ -209,10 +131,6 @@ impl BackgroundJob {
                 .error("#[coil::background_job] cannot be used on unsafe functions"));
         }
 
-        if sig.asyncness.is_some() {
-            is_async = true;
-        }
-
         if let Some(abi) = sig.abi {
             return Err(abi
                 .span()
@@ -222,13 +140,13 @@ impl BackgroundJob {
         if !sig.generics.params.is_empty() {
             generics_exist = true;
         }
-    /*
-        if let Some(where_clause) = sig.generics.where_clause {
-            return Err(where_clause.where_token.span.error(
-                "#[coil::background_job] cannot be used on functions with a where clause",
-            ));
-        }
-    */
+        /*
+            if let Some(where_clause) = sig.generics.where_clause {
+                return Err(where_clause.where_token.span.error(
+                    "#[coil::background_job] cannot be used on functions with a where clause",
+                ));
+            }
+        */
         let fn_token = sig.fn_token;
         let return_type = sig.output.clone();
         let ident = sig.ident.clone();
@@ -243,9 +161,8 @@ impl BackgroundJob {
             args: job_args,
             return_type,
             body: block.stmts,
-            is_async,
             generics,
-            generics_exist
+            generics_exist,
         })
     }
 }
@@ -394,7 +311,8 @@ impl ConnectionArg {
     }
 
     fn is_connection_arg(ty: &syn::Type) -> bool {
-       /* Self::is_single_connection(ty) ||*/ Self::is_pool(ty)
+        /* Self::is_single_connection(ty) ||*/
+        Self::is_pool(ty)
     }
 
     fn from_arg(pat: Box<syn::Pat>, ty: Box<syn::Type>) -> Self {

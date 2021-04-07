@@ -17,13 +17,11 @@
 use crate::job::Job;
 use crate::{db, error::*, registry::Registry};
 use channel::Sender;
-use futures::task::{Spawn, SpawnExt};
-use futures::{executor::block_on, future::FutureExt, Future, StreamExt};
+use futures::executor::block_on;
 use sqlx::PgPool;
 use sqlx::Postgres;
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe, PanicInfo, RefUnwindSafe, UnwindSafe};
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,7 +30,6 @@ pub struct Builder<Env> {
     environment: Env,
     num_threads: Option<usize>,
     pg_pool: sqlx::PgPool,
-    executor: Arc<dyn Spawn>,
     max_tasks: Option<usize>,
     registry: Registry<Env>,
     on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
@@ -42,11 +39,10 @@ pub struct Builder<Env> {
 
 impl<Env: 'static> Builder<Env> {
     /// Instantiate a new instance of the Builder
-    pub fn new(env: Env, executor: impl Spawn + 'static, pg_pool: sqlx::PgPool) -> Self {
+    pub fn new(environment: Env, pg_pool: sqlx::PgPool) -> Self {
         Self {
-            environment: env,
+            environment,
             pg_pool,
-            executor: Arc::new(executor),
             max_tasks: None,
             num_threads: None,
             registry: Registry::load(),
@@ -63,13 +59,13 @@ impl<Env: 'static> Builder<Env> {
     ///
     ///  # Example
     ///  ```ignore
-    ///  RunnerBuilder::new(env, executor, conn)
+    ///  RunnerBuilder::new(env, conn)
     ///      .register_job::<resize_image::Job<String>>()
     ///  ```
     ///  Different jobs must be registered with different generics if they exist.
     ///
     ///  ```ignore
-    ///  RunnerBuilder::new((), executor, conn)
+    ///  RunnerBuilder::new((), conn)
     ///     .register_job::<resize_image::Job<String>>()
     ///     .register_job::<resize_image::Job<u32>>()
     ///     .register_job::<resize_image::Job<MyStruct>()
@@ -126,7 +122,6 @@ impl<Env: 'static> Builder<Env> {
             .unwrap_or_else(|| std::time::Duration::from_secs(5));
         Ok(Runner {
             threadpool,
-            executor: self.executor,
             pg_pool: self.pg_pool,
             environment: Arc::new(self.environment),
             registry: Arc::new(self.registry),
@@ -139,10 +134,8 @@ impl<Env: 'static> Builder<Env> {
 
 /// Runner for background tasks.
 /// Synchronous tasks are run in a threadpool.
-/// Asynchronous tasks are spawned on the executor.
 pub struct Runner<Env> {
     threadpool: rayon::ThreadPool,
-    executor: Arc<dyn Spawn>,
     pg_pool: PgPool,
     environment: Arc<Env>,
     registry: Arc<Registry<Env>>,
@@ -174,8 +167,8 @@ type TxJobPair = Option<(
 // Methods which don't require `RefUnwindSafe`
 impl<Env: 'static> Runner<Env> {
     /// Build the builder for `Runner`
-    pub fn builder(env: Env, executor: impl Spawn + 'static, conn: &sqlx::PgPool) -> Builder<Env> {
-        Builder::new(env, executor, conn.clone())
+    pub fn builder(env: Env, conn: &sqlx::PgPool) -> Builder<Env> {
+        Builder::new(env, conn.clone())
     }
 
     /// Get a Pool Connection from the pool that the runner is using.
@@ -191,29 +184,10 @@ impl<Env: 'static> Runner<Env> {
 }
 
 impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
-    /// Run all synchronous tasks
-    /// Spawns synchronous tasks onto a rayon threadpool
-    /// Returns how many tasks were actually queued
-    pub async fn run_all_sync_tasks(&self) -> Result<usize, FetchError> {
-        self.run_pending_tasks(|tx| self.run_single_sync_job(tx))
-            .await
-    }
-
-    /// Run all asynchronous tasks
-    /// Spawns asynchronous tasks onto the specified executor
-    /// Returns how many tasks were actually queued
-    pub async fn run_all_async_tasks(&self) -> Result<usize, FetchError> {
-        self.run_pending_tasks(|tx| self.run_single_async_job(tx))
-            .await
-    }
-
     /// Runs all the pending tasks in a loop
     /// Returns how many tasks are running as a result
-    async fn run_pending_tasks<F>(&self, fun: F) -> Result<usize, FetchError>
-    where
-        F: Fn(Sender<Event>),
-    {
-        let (tx, mut rx) = channel::bounded(self.max_tasks);
+    pub fn run_pending_tasks<F>(&self) -> Result<usize, FetchError> {
+        let (tx, rx) = channel::bounded(self.max_tasks);
 
         let mut pending_messages = 0;
         let mut queued = 0;
@@ -225,44 +199,21 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
             };
 
             for _ in 0..jobs_to_queue {
-                fun(tx.clone());
+                self.run_single_sync_job(tx.clone())
             }
 
             pending_messages += jobs_to_queue;
-
-            let mut timeout = timer::Delay::new(self.timeout).fuse();
-            let mut next_msg = rx.next().fuse();
-            futures::select! {
-                msg = next_msg => {
-                    match msg {
-                        Some(Event::Working) => {
-                            pending_messages -= 1;
-                            queued += 1;
-                        },
-                        Some(Event::NoJobAvailable) => return Ok(queued),
-                        Some(Event::ErrorLoadingJob(e)) => return Err(FetchError::FailedLoadingJob(e)),
-                        None =>  return Err(FetchError::NoMessage.into()),
-                        _ => return Ok(queued),
-                    }
-                },
-                _ = timeout => return Err(FetchError::Timeout.into())
-            };
-        }
-    }
-
-    fn run_single_async_job(&self, tx: Sender<Event>) {
-        let env = Arc::clone(&self.environment);
-        let registry = Arc::clone(&self.registry);
-        let pg_pool = self.pg_pool.clone();
-        self.get_single_async_job(tx, |job| {
-            async move {
-                let perform_fn = registry.get(&job.job_type).ok_or_else(|| {
-                    PerformError::from(format!("Unknown job type {}", job.job_type))
-                })?;
-                perform_fn.perform_async(job.data, env, &pg_pool).await
+            match rx.recv_timeout(self.timeout) {
+                Ok(Event::Working) => {
+                    pending_messages -= 1;
+                    queued += 1;
+                }
+                Ok(Event::NoJobAvailable) => return Ok(queued),
+                Ok(Event::ErrorLoadingJob(e)) => return Err(FetchError::FailedLoadingJob(e)),
+                Err(_) => return Err(FetchError::NoMessage.into()),
+                _ => return Ok(queued),
             }
-            .boxed()
-        });
+        }
     }
 
     fn run_single_sync_job(&self, tx: Sender<Event>) {
@@ -278,43 +229,6 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         });
     }
 
-    fn get_single_async_job<F>(&self, tx: Sender<Event>, fun: F)
-    where
-        F: FnOnce(
-                db::BackgroundJob,
-            ) -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>>
-            + Send
-            + 'static,
-    {
-        let pg_pool = self.pg_pool.clone();
-        let finish_hook = self.on_finish.clone();
-        let _ = self.executor.spawn(async move {
-            let run = || -> Pin<Box<dyn Future<Output = Result<(), PerformError>> + Send>> {
-                async move {
-                    let (transaction, job) =
-                        if let Some((t, j)) = Self::get_next_job(tx, &pg_pool, true).await {
-                            (t, j)
-                        } else {
-                            return Ok(());
-                        };
-                    let job_id = job.id;
-                    // TODO: Need to decide how or if we should handle panics in futures. Wrap with catch_unwind?
-                    // Since we require the `Spawn` trait, the task executor should handle panics, not us?
-                    // However, since we _dont_ handle panics, retry_counter won't be updated
-                    Self::finish_work(fun(job).await, transaction, job_id, finish_hook).await;
-                    Ok(())
-                }
-                .boxed()
-            };
-            match run().await {
-                Ok(_) => {}
-                Err(e) => {
-                    panic!("failed to update job {:?}", e);
-                }
-            };
-        });
-    }
-
     fn get_single_sync_job<F>(&self, tx: Sender<Event>, fun: F)
     where
         F: FnOnce(db::BackgroundJob) -> Result<(), PerformError> + Send + UnwindSafe + 'static,
@@ -324,7 +238,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         self.threadpool.spawn_fifo(move || {
             let res = move || -> Result<(), PerformError> {
                 let (transaction, job) =
-                    if let Some((t, j)) = block_on(Self::get_next_job(tx, &pg_pool, false)) {
+                    if let Some((t, j)) = block_on(Self::get_next_job(tx, &pg_pool)) {
                         (t, j)
                     } else {
                         return Ok(());
@@ -347,26 +261,26 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     }
 
     /// returns a transaction/job pair for the next Job
-    async fn get_next_job(tx: Sender<Event>, pg_pool: &PgPool, is_async: bool) -> TxJobPair {
+    async fn get_next_job(tx: Sender<Event>, pg_pool: &PgPool) -> TxJobPair {
         let mut transaction = match pg_pool.begin().await {
             Ok(t) => t,
             Err(e) => {
-                let _ = tx.send(Event::ErrorLoadingJob(e)).await;
+                let _ = tx.send(Event::ErrorLoadingJob(e));
                 return None;
             }
         };
 
-        let job = match db::find_next_unlocked_job(&mut transaction, Some(is_async)).await {
+        let job = match db::find_next_unlocked_job(&mut transaction).await {
             Ok(Some(j)) => {
-                let _ = tx.send(Event::Working).await;
+                let _ = tx.send(Event::Working);
                 j
             }
             Ok(None) => {
-                let _ = tx.send(Event::NoJobAvailable).await;
+                let _ = tx.send(Event::NoJobAvailable);
                 return None;
             }
             Err(e) => {
-                let _ = tx.send(Event::ErrorLoadingJob(e)).await;
+                let _ = tx.send(Event::ErrorLoadingJob(e));
                 return None;
             }
         };
@@ -418,12 +332,15 @@ fn try_to_extract_panic_info(info: &(dyn Any + Send + 'static)) -> PerformError 
 impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     /// Wait for tasks to finish based on timeout
     /// this is mostly used for internal tests
-    async fn wait_for_all_tasks(&self, mut rx: channel::Receiver<Event>, pending: usize) {
+    async fn wait_for_all_tasks(&self, rx: channel::Receiver<Event>, pending: usize) {
+        use futures::{FutureExt, StreamExt};
+
         let mut dummy_tasks = pending;
+        let mut rx = rx.into_stream();
         while dummy_tasks > 0 {
             let timeout = timer::Delay::new(self.timeout);
             futures::select! {
-                msg = rx.next().fuse() => match msg {
+                msg = rx.next() => match msg {
                     // Some(Event::Working) => continue,
                     Some(Event::NoJobAvailable) => break,
                     Some(Event::Dummy) => dummy_tasks -= 1,
@@ -480,40 +397,28 @@ mod tests {
         }
     }
 
-    struct Executor;
-    impl futures::task::Spawn for Executor {
-        fn spawn_obj(
-            &self,
-            future: futures::task::FutureObj<'static, ()>,
-        ) -> Result<(), futures::task::SpawnError> {
-            smol::spawn(future).detach();
-            Ok(())
-        }
-    }
-
     fn runner() -> Runner<()> {
         let database_url =
             dotenv::var("DATABASE_URL").expect("DATABASE_URL must be set to run tests");
         let pool = smol::block_on(sqlx::PgPool::connect(database_url.as_str())).unwrap();
-        crate::Runner::builder((), Executor, &pool)
+        crate::Runner::builder((), &pool)
             .num_threads(2)
             .timeout(std::time::Duration::from_secs(5))
             .build()
             .unwrap()
     }
 
-    fn create_dummy_job(runner: &Runner<()>, is_async: bool) -> i64 {
+    fn create_dummy_job(runner: &Runner<()>) -> i64 {
         let data = rmp_serde::to_vec(vec![0].as_slice()).unwrap();
         smol::block_on(async move {
             let mut conn = runner.connection().await.unwrap();
             let _rec = sqlx::query(
-                "INSERT INTO _background_tasks (job_type, data, is_async)
-                VALUES ($1, $2, $3)
+                "INSERT INTO _background_tasks (job_type, data)
+                VALUES ($1, $2)
                 RETURNING (id, job_type, data)",
             )
             .bind("Foo")
             .bind(data)
-            .bind(is_async)
             .fetch_one(&mut conn)
             .await
             .unwrap();
@@ -537,54 +442,12 @@ mod tests {
     }
 
     #[test]
-    fn async_jobs_are_locked_when_fetched() {
-        crate::initialize();
-        let _guard = TestGuard::lock();
-        let mut runner = runner();
-        let first_job_id = create_dummy_job(&runner, true);
-        let second_job_id = create_dummy_job(&runner, true);
-        let fetch_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
-        let fetch_barrier2 = fetch_barrier.clone();
-        let return_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
-        let return_barrier2 = return_barrier.clone();
-
-        let (tx, rx) = channel::bounded(3);
-        let tx0 = tx.clone();
-        runner.on_finish = Some(Arc::new(move |_| {
-            smol::block_on(tx0.send(Event::Dummy)).unwrap();
-        }));
-
-        smol::block_on(async move {
-            runner.get_single_async_job(tx.clone(), move |job| {
-                async move {
-                    fetch_barrier.0.wait();
-                    assert_eq!(first_job_id, job.id);
-                    return_barrier.0.wait();
-                    Ok(())
-                }
-                .boxed()
-            });
-
-            fetch_barrier2.0.wait();
-            runner.get_single_async_job(tx.clone(), move |job| {
-                async move {
-                    assert_eq!(second_job_id, job.id);
-                    return_barrier2.0.wait();
-                    Ok(())
-                }
-                .boxed()
-            });
-            runner.wait_for_all_tasks(rx, 2).await;
-        });
-    }
-
-    #[test]
     fn sync_jobs_are_locked_when_fetched() {
         crate::initialize();
         let _guard = TestGuard::lock();
         let mut runner = runner();
-        let first_job_id = create_dummy_job(&runner, false);
-        let second_job_id = create_dummy_job(&runner, false);
+        let first_job_id = create_dummy_job(&runner);
+        let second_job_id = create_dummy_job(&runner);
         let fetch_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
         let fetch_barrier2 = fetch_barrier.clone();
         let return_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
@@ -593,7 +456,7 @@ mod tests {
         let (tx, rx) = channel::bounded(3);
         let tx0 = tx.clone();
         runner.on_finish = Some(Arc::new(move |_| {
-            smol::block_on(tx0.send(Event::Dummy)).unwrap();
+            tx0.send(Event::Dummy).unwrap();
         }));
 
         runner.get_single_sync_job(tx.clone(), move |job| {
@@ -622,13 +485,13 @@ mod tests {
         let mut runner = runner();
         let tx0 = tx.clone();
         runner.on_finish = Some(Arc::new(move |_| {
-            smol::block_on(tx0.send(Event::Dummy)).unwrap();
+            tx0.send(Event::Dummy).unwrap();
         }));
-        create_dummy_job(&runner, true);
+        create_dummy_job(&runner);
 
         smol::block_on(async move {
             let mut conn = runner.connection().await.unwrap();
-            runner.get_single_async_job(tx.clone(), move |_| async move { Ok(()) }.boxed());
+            runner.get_single_sync_job(tx.clone(), move |_| Ok(()));
             runner.wait_for_all_tasks(rx, 1).await;
             let remaining_jobs = get_job_count(&mut conn).await;
             assert_eq!(0, remaining_jobs);
@@ -640,11 +503,11 @@ mod tests {
         crate::initialize();
         let _guard = TestGuard::lock();
         let mut runner = runner();
-        let job_id = create_dummy_job(&runner, false);
+        let job_id = create_dummy_job(&runner);
         let (tx, rx) = channel::bounded(3);
         let tx0 = tx.clone();
         runner.on_finish = Some(Arc::new(move |_| {
-            smol::block_on(tx0.send(Event::Dummy)).unwrap();
+            tx0.send(Event::Dummy).unwrap();
         }));
         runner.get_single_sync_job(tx.clone(), move |_| panic!());
         smol::block_on(runner.wait_for_all_tasks(rx, 1));
