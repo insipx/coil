@@ -18,9 +18,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    /// Error building the Rayon threadpool
-    #[error("Building pool failed {0}")]
-    Build(#[from] rayon::ThreadPoolBuildError),
     /// Error Enqueing a task for execution later
     #[error(transparent)]
     Enqueue(#[from] EnqueueError),

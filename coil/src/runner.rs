@@ -24,13 +24,13 @@ use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe, PanicInfo, RefUnwindSafe, UnwindSafe};
 use std::sync::Arc;
 use std::time::Duration;
+use threadpool::ThreadPool;
 
 /// Builder pattern struct for the Runner
 pub struct Builder<Env> {
     environment: Env,
     num_threads: Option<usize>,
     pg_pool: sqlx::PgPool,
-    max_tasks: Option<usize>,
     registry: Registry<Env>,
     on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
     /// Amount of time to wait until job is deemed a failure
@@ -43,7 +43,6 @@ impl<Env: 'static> Builder<Env> {
         Self {
             environment,
             pg_pool,
-            max_tasks: None,
             num_threads: None,
             registry: Registry::load(),
             on_finish: None,
@@ -82,12 +81,6 @@ impl<Env: 'static> Builder<Env> {
         self
     }
 
-    /// Specify the maximum tasks  to queue in the threadpool at any given time
-    pub fn max_tasks(mut self, max_tasks: usize) -> Self {
-        self.max_tasks = Some(max_tasks);
-        self
-    }
-
     /// Provide a hook that runs after a job has finished and all destructors have run
     /// the `on_finish` closure accepts the job ID that finished as an argument
     pub fn on_finish(mut self, on_finish: impl Fn(i64) + Send + Sync + 'static) -> Self {
@@ -105,27 +98,20 @@ impl<Env: 'static> Builder<Env> {
 
     /// Build the runner
     pub fn build(self) -> Result<Runner<Env>, Error> {
-        let threadpool = if let Some(t) = self.num_threads {
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(t)
-                .thread_name(|i| format!("coil-{}", i))
-        } else {
-            rayon::ThreadPoolBuilder::new().thread_name(|i| format!("coil-{}", i))
-        };
-        let threadpool = threadpool.build()?;
+        let threadpool = ThreadPool::with_name(
+            "coil-worker".to_string(),
+            self.num_threads.unwrap_or(num_cpus::get()),
+        );
 
-        let max_tasks = self
-            .max_tasks
-            .unwrap_or_else(|| threadpool.current_num_threads());
         let timeout = self
             .timeout
             .unwrap_or_else(|| std::time::Duration::from_secs(5));
+
         Ok(Runner {
             threadpool,
             pg_pool: self.pg_pool,
             environment: Arc::new(self.environment),
             registry: Arc::new(self.registry),
-            max_tasks,
             on_finish: self.on_finish,
             timeout,
         })
@@ -135,12 +121,10 @@ impl<Env: 'static> Builder<Env> {
 /// Runner for background tasks.
 /// Synchronous tasks are run in a threadpool.
 pub struct Runner<Env> {
-    threadpool: rayon::ThreadPool,
+    threadpool: ThreadPool,
     pg_pool: PgPool,
     environment: Arc<Env>,
     registry: Arc<Registry<Env>>,
-    /// maximum number of tasks to run at any one time
-    max_tasks: usize,
     on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
     timeout: Duration,
 }
@@ -186,16 +170,18 @@ impl<Env: 'static> Runner<Env> {
 impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     /// Runs all the pending tasks in a loop
     /// Returns how many tasks are running as a result
-    pub fn run_pending_tasks<F>(&self) -> Result<usize, FetchError> {
-        let (tx, rx) = channel::bounded(self.max_tasks);
+    pub fn run_pending_tasks(&self) -> Result<(), FetchError> {
+        let max_threads = self.threadpool.max_count();
+        let (tx, rx) = channel::bounded(max_threads);
 
         let mut pending_messages = 0;
-        let mut queued = 0;
         loop {
+            let available_threads = max_threads - self.threadpool.active_count();
+
             let jobs_to_queue = if pending_messages == 0 {
-                self.max_tasks
+                std::cmp::max(available_threads, 1)
             } else {
-                self.max_tasks - pending_messages
+                available_threads
             };
 
             for _ in 0..jobs_to_queue {
@@ -204,14 +190,12 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
 
             pending_messages += jobs_to_queue;
             match rx.recv_timeout(self.timeout) {
-                Ok(Event::Working) => {
-                    pending_messages -= 1;
-                    queued += 1;
-                }
-                Ok(Event::NoJobAvailable) => return Ok(queued),
+                Ok(Event::Working) => pending_messages -= 1,
+                Ok(Event::NoJobAvailable) => return Ok(()),
                 Ok(Event::ErrorLoadingJob(e)) => return Err(FetchError::FailedLoadingJob(e)),
+                Err(channel::RecvTimeoutError::Timeout) => return Err(FetchError::Timeout.into()),
                 Err(_) => return Err(FetchError::NoMessage.into()),
-                _ => return Ok(queued),
+                _ => return Ok(()),
             }
         }
     }
@@ -235,7 +219,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     {
         let pg_pool = self.pg_pool.clone();
         let finish_hook = self.on_finish.clone();
-        self.threadpool.spawn_fifo(move || {
+        self.threadpool.execute(move || {
             let res = move || -> Result<(), PerformError> {
                 let (transaction, job) =
                     if let Some((t, j)) = block_on(Self::get_next_job(tx, &pg_pool)) {
@@ -302,7 +286,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
             }
             Err(e) => {
                 // TODO: Fix killing the execution
-                // eprintln!("Job {} failed to run: {}", job_id, e);
+                eprintln!("Job {} failed to run: {}", job_id, e);
                 db::update_failed_job(&mut trx, job_id)
                     .await
                     .expect(&format!("failed to update failed job: {:?}", e));

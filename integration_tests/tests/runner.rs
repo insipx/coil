@@ -20,7 +20,7 @@ fn run_all_pending_jobs_returns_when_all_jobs_enqueued() -> Result<()> {
     smol::block_on(async {
         barrier_job().enqueue(&conn).await.unwrap();
         barrier_job().enqueue(&conn).await.unwrap();
-        runner.run_all_sync_tasks().await.unwrap();
+        runner.run_pending_tasks().unwrap();
 
         let queued_job_count =
             sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM _background_tasks")
@@ -55,16 +55,17 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
         barrier_job().enqueue(&conn).await
     })?;
 
-    smol::block_on(runner.run_all_sync_tasks())?;
+    runner.run_pending_tasks()?;
     let (tx, rx) = channel::bounded(1);
 
     let handle = thread::spawn(move || {
-        let mut rx0 = rx.clone();
+        let rx0 = rx.clone();
         let timeout = timer::Delay::new(Duration::from_millis(100));
 
         let res = smol::block_on(async {
+            let mut stream = rx0.into_stream();
             futures::select! {
-                msg = rx0.next().fuse() => false,
+                _ = stream.next() => false,
                 _ = timeout.fuse() => true
             }
         });
@@ -72,14 +73,11 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
 
         barrier.wait();
 
-        assert!(
-            smol::block_on(rx.recv()).is_ok(),
-            "wait_for_jobs didn't return"
-        );
+        assert!(rx.recv().is_ok(), "wait_for_jobs didn't return");
     });
 
     let _ = smol::block_on(runner.check_for_failed_jobs(task_wait, 2));
-    smol::block_on(tx.send(()))?;
+    tx.send(())?;
     handle.join().unwrap();
     Ok(())
 }
@@ -96,7 +94,7 @@ fn check_for_failed_jobs_panics_if_jobs_failed() -> Result<()> {
         failure_job().enqueue(&conn).await
     })?;
 
-    smol::block_on(runner.run_all_sync_tasks())?;
+    runner.run_pending_tasks()?;
     assert_eq!(
         Err(coil::FailedJobsError::JobsFailed(3)),
         smol::block_on(runner.check_for_failed_jobs(rx, 3))
@@ -115,7 +113,7 @@ fn panicking_jobs_are_caught_and_treated_as_failures() -> Result<()> {
         failure_job().enqueue(&conn).await
     })?;
 
-    smol::block_on(runner.run_all_sync_tasks())?;
+    runner.run_pending_tasks()?;
     let failed_jobs = smol::block_on(runner.check_for_failed_jobs(rx, 2));
     assert_eq!(Err(coil::FailedJobsError::JobsFailed(2)), failed_jobs);
     Ok(())
@@ -130,9 +128,8 @@ fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
     // The second job will never start.
     let runner = TestGuard::builder(barrier.clone())
         .num_threads(1)
-        .max_tasks(1)
         .on_finish(move |_| {
-            let _ = smol::block_on(tx.send(coil::Event::Dummy));
+            let _ = tx.send(coil::Event::Dummy);
         })
         .timeout(Duration::from_millis(50))
         .build();
@@ -143,7 +140,7 @@ fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
         barrier_job().enqueue(&conn).await
     })?;
 
-    let run_result = smol::block_on(runner.run_all_sync_tasks());
+    let run_result = runner.run_pending_tasks();
     assert_matches!(run_result, Err(coil::FetchError::Timeout));
 
     // Make sure the jobs actually run so we don't panic on drop
@@ -157,16 +154,15 @@ fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
 // FIXME: This test should work but postgres isn't recognizing default_transaction_read_only for some reason
 // I don't know why.
 #[ignore]
-fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
+pub(crate) fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
     crate::initialize();
     let (tx, rx) = channel::bounded(3);
 
     let runner = TestGuard::builder(())
         .num_threads(1)
-        .max_tasks(1)
         .timeout(std::time::Duration::from_secs(1))
         .on_finish(move |_| {
-            let _ = smol::block_on(tx.send(coil::Event::Dummy));
+            let _ = tx.send(coil::Event::Dummy);
         })
         .build();
     log::info!("RUNNING `jobs_failing_to_load_doesnt_panic_threads`");
@@ -175,16 +171,16 @@ fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
         failure_job().enqueue(&mut conn).await.unwrap();
         // Since jobs are loaded with `SELECT FOR UPDATE`, it will always fail in
         // read-only mode
-        conn.execute("SET default_transaction_read_only = on")
+        conn.execute("SET default_transaction_read_only = 't'")
             .await
             .unwrap();
     });
 
-    let run_result = smol::block_on(runner.run_all_sync_tasks());
+    let run_result = runner.run_pending_tasks();
 
     smol::block_on(async {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
-        conn.execute("SET default_transaction_read_only = off")
+        conn.execute("SET default_transaction_read_only = 'f'")
             .await
             .unwrap();
         assert_matches!(run_result, Err(coil::FetchError::FailedLoadingJob(_)));

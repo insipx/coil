@@ -24,17 +24,6 @@ pub fn initialize() {
     });
 }
 
-struct Executor;
-impl futures::task::Spawn for Executor {
-    fn spawn_obj(
-        &self,
-        future: futures::task::FutureObj<'static, ()>,
-    ) -> Result<(), futures::task::SpawnError> {
-        smol::spawn(future).detach();
-        Ok(())
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 struct Size {
     height: u32,
@@ -46,13 +35,8 @@ pub struct Environment {
 }
 
 #[coil::background_job]
-async fn resize_image_async(to_sleep: u64) -> Result<(), coil::PerformError> {
-    smol::Timer::after(std::time::Duration::from_millis(to_sleep)).await;
-    Ok(())
-}
-
-#[coil::background_job]
 fn resize_image(_name: String) -> Result<(), coil::PerformError> {
+    std::thread::sleep(std::time::Duration::from_millis(150));
     Ok(())
 }
 
@@ -103,7 +87,7 @@ fn enqueue_8_jobs_limited_size() {
     });
 
     smol::block_on(async move {
-        runner.run_all_sync_tasks().await.unwrap();
+        runner.run_pending_tasks().unwrap();
         runner.check_for_failed_jobs(rx, 8).await.unwrap();
     });
 }
@@ -115,7 +99,7 @@ fn generic_jobs_can_be_enqueued() {
     let runner = TestGuard::builder(())
         .register_job::<resize_image_gen::Job<String>>()
         .on_finish(move |_| {
-            smol::block_on(tx.send(coil::Event::Dummy)).unwrap();
+            tx.send(coil::Event::Dummy).unwrap();
         })
         .build();
     log::info!("RUNNING `generic_jobs_can_be_enqueued`");
@@ -142,7 +126,7 @@ fn generic_jobs_can_be_enqueued() {
             .enqueue(&pool)
             .await
             .unwrap();
-        runner.run_all_sync_tasks().await.unwrap();
+        runner.run_pending_tasks().unwrap();
         runner.check_for_failed_jobs(rx, 5).await.unwrap();
     });
 }
