@@ -27,7 +27,7 @@ fn generated_jobs_serialize_all_arguments_except_first() {
             .enqueue(&mut conn)
             .await
             .unwrap();
-        runner.run_all_sync_tasks().await.unwrap();
+        runner.run_pending_tasks().unwrap();
     });
 
     assert_eq!(
@@ -55,7 +55,7 @@ fn jobs_with_args_but_no_env() {
             .enqueue(&mut conn)
             .await
             .unwrap();
-        runner.run_all_sync_tasks().await.unwrap();
+        runner.run_pending_tasks().unwrap();
     });
     assert_eq!(
         Err(JobsFailed(1)),
@@ -76,7 +76,7 @@ fn env_can_have_any_name() {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
         env_with_different_name().enqueue(&mut conn).await.unwrap();
 
-        runner.run_all_sync_tasks().await.unwrap();
+        runner.run_pending_tasks().unwrap();
         runner.check_for_failed_jobs(rx, 1).await.unwrap();
     })
 }
@@ -100,7 +100,7 @@ fn test_imports_only_used_in_job_body_are_not_warned_as_unused() {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
         uses_trait_import().enqueue(&mut conn).await.unwrap();
 
-        runner.run_all_sync_tasks().await.unwrap();
+        runner.run_pending_tasks().unwrap();
         runner.check_for_failed_jobs(rx, 1).await.unwrap();
     });
 }
@@ -108,23 +108,17 @@ fn test_imports_only_used_in_job_body_are_not_warned_as_unused() {
 #[test]
 fn jobs_can_take_a_connection_as_an_argument() {
     #[coil::background_job]
-    async fn takes_env_and_conn(_env: &(), pool: &PgPool) -> Result<(), coil::PerformError> {
-        sqlx::query("SELECT 1").execute(pool).await?;
-        Ok(())
-    }
-
-    #[coil::background_job]
-    fn takes_env_and_conn_sync(_env: &(), pool: &PgPool) -> Result<(), coil::PerformError> {
+    fn takes_env_and_conn(_env: &(), pool: &PgPool) -> Result<(), coil::PerformError> {
         smol::block_on(sqlx::query("SELECT 1").execute(pool))?;
         Ok(())
     }
 
     #[coil::background_job]
-    async fn takes_just_pool(pool: &PgPool) -> Result<(), coil::PerformError> {
-        let mut conn1 = pool.acquire().await?;
-        let mut conn2 = pool.acquire().await?;
-        sqlx::query("SELECT 1").execute(&mut conn1).await?;
-        sqlx::query("SELECT 1").execute(&mut conn2).await?;
+    fn takes_just_pool(pool: &PgPool) -> Result<(), coil::PerformError> {
+        let mut conn1 = smol::block_on(pool.acquire())?;
+        let mut conn2 = smol::block_on(pool.acquire())?;
+        smol::block_on(sqlx::query("SELECT 1").execute(&mut conn1))?;
+        smol::block_on(sqlx::query("SELECT 1").execute(&mut conn2))?;
         Ok(())
     }
 
@@ -141,16 +135,13 @@ fn jobs_can_take_a_connection_as_an_argument() {
     smol::block_on(async {
         let mut conn = runner.connection_pool().acquire().await.unwrap();
         takes_env_and_conn().enqueue(&mut conn).await.unwrap();
-        takes_env_and_conn_sync().enqueue(&mut conn).await.unwrap();
         takes_just_pool().enqueue(&mut conn).await.unwrap();
         takes_fully_qualified_pool()
             .enqueue(&mut conn)
             .await
             .unwrap();
 
-        runner.run_all_sync_tasks().await.unwrap();
-        runner.run_all_async_tasks().await.unwrap();
-
+        runner.run_pending_tasks().unwrap();
         runner.check_for_failed_jobs(rx, 4).await.unwrap();
     });
 }
@@ -170,7 +161,7 @@ fn proc_macro_accepts_arbitrary_where_clauses() {
     let runner = TestGuard::builder(())
         .register_job::<can_specify_where_clause::Job<String>>()
         .on_finish(move |_| {
-            let _ = smol::block_on(tx.send(coil::Event::Dummy)).unwrap();
+            let _ = tx.send(coil::Event::Dummy).unwrap();
         })
         .build();
 
@@ -181,7 +172,7 @@ fn proc_macro_accepts_arbitrary_where_clauses() {
             .await
             .unwrap();
 
-        runner.run_all_sync_tasks().await.unwrap();
+        runner.run_pending_tasks().unwrap();
         runner.check_for_failed_jobs(rx, 1).await.unwrap();
     });
 }

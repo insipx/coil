@@ -24,7 +24,7 @@ impl<'a, Env> TestGuard<'a, Env> {
             .idle_timeout(std::time::Duration::from_millis(1000))
             .connect_lazy(&crate::DATABASE_URL)
             .unwrap();
-        let builder = Runner::builder(env, crate::Executor, &pg_pool);
+        let builder = Runner::builder(env, &pg_pool);
         GuardBuilder { builder }
     }
 
@@ -34,7 +34,7 @@ impl<'a, Env> TestGuard<'a, Env> {
         (
             Self::builder(env)
                 .on_finish(move |_| {
-                    let _ = smol::block_on(tx.send(coil::Event::Dummy));
+                    let _ = tx.send(coil::Event::Dummy);
                 })
                 .num_threads(4)
                 .build(),
@@ -50,7 +50,7 @@ impl<'a> TestGuard<'a, ()> {
             Self::builder(())
                 .num_threads(4)
                 .on_finish(move |_| {
-                    let _ = smol::block_on(tx.send(coil::Event::Dummy));
+                    let _ = tx.send(coil::Event::Dummy);
                 })
                 .build(),
             rx,
@@ -70,11 +70,6 @@ impl<Env> GuardBuilder<Env> {
 
     pub fn num_threads(mut self, threads: usize) -> Self {
         self.builder = self.builder.num_threads(threads);
-        self
-    }
-
-    pub fn max_tasks(mut self, max_tasks: usize) -> Self {
-        self.builder = self.builder.max_tasks(max_tasks);
         self
     }
 
