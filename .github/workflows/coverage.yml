@@ -38,12 +38,12 @@ jobs:
           override: true
 
       - name: Cargo Clean
-        uses: actions-rs/cargo@v1
+        uses: actions-rs/cargo@v1.0.3
         with:
           command: clean
 
       - name: Run Tests for Coverage
-        uses: actions-rs/cargo@v1
+        uses: actions-rs/cargo@v1.0.3
         with:
           command: test
           args: --no-fail-fast
