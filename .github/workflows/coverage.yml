@@ -56,7 +56,7 @@ jobs:
           SMOL_THREADS: 2
 
       - id: coverage
-        uses: actions-rs/grcov@v0.1
+        uses: actions-rs/grcov@v0.1.6
 
       - name: Coveralls upload
         uses: coverallsapp/github-action@master
