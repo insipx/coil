@@ -37,7 +37,7 @@ jobs:
           toolchain: stable
           override: true
       - name: Run cargo test
-        uses: actions-rs/cargo@v1
+        uses: actions-rs/cargo@v1.0.3
         with:
           command: test
         env:
