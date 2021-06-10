@@ -55,7 +55,7 @@ pub enum EnqueueError {
     Sql(#[from] sqlx::Error),
     /// Error encoding job arguments
     #[error("Error encoding task for insertion {0}")]
-    Encode(#[from] rmp_serde::encode::Error),
+    Encode(#[from] serde_json::Error),
     #[error("Error enqueuing batch tasks")]
     Batch(#[from] BatchInsertError),
 }

@@ -1,8 +1,8 @@
 let
-  moz_overlay = (import "/home/insipx/.config/nixpkgs/overlays/rust-overlay.nix");
-  nixpkgs = import <nixpkgs> { overlays = [ moz_overlay ]; };
+  # moz_overlay = (import "/home/insipx/.config/nixpkgs/overlays/rust-overlay.nix");
+  nixpkgs = import <nixpkgs> { overlays = [ ]; };
   unstable = import (fetchTarball "channel:nixos-unstable") {};
-  rustnightly = ((nixpkgs.rustChannelOf { date = "2021-03-26"; channel = "nightly"; }).rust.override { extensions = [ "rust-src" "rust-analysis" ]; });
+  # rustnightly = ((nixpkgs.rustChannelOf { date = "2021-03-26"; channel = "nightly"; }).rust.override { extensions = [ "rust-src" "rust-analysis" ]; });
 
 in
   with nixpkgs;
@@ -11,26 +11,14 @@ in
       openssl
       pkg-config
       nasm
-      rustnightly
+      unstable.rustup
       unstable.cargo-expand
       cmake
       zlib
-      postgresql
+      postgresql_13
     ];
     shellHook = ''
-              export PGDATA=$PWD/.tmp/postgres_data
-              export PGHOST=$PWD/.tmp/postgres
-              export LOG_PATH=$PWD/.tmp/postgres/LOG
-              export PGDATABASE=postgres
-              export DATABASE_URL="postgres://postgres?host=$PGHOST"
-              if [ ! -d $PGHOST ]; then
-                mkdir -p $PGHOST
-              fi
-              if [ ! -d $PGDATA ]; then
-                echo 'initializing postgresql database...'
-                initdb $PGDATA --auth=trust >/dev/null
-              fi
-              pg_ctl start -l $LOG_PATH -o "-c listen_addresses= -c unix_socket_directories=$PGHOST"
+      export DATABASE_URL="postgres://postgres:123@localhost/coil-testdb"
     '';
 }
 

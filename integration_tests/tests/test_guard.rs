@@ -28,33 +28,14 @@ impl<'a, Env> TestGuard<'a, Env> {
         GuardBuilder { builder }
     }
 
-    pub fn runner(env: Env, tasks: usize) -> (Self, channel::Receiver<coil::Event>) {
-        let (tx, rx) = channel::bounded(tasks);
-
-        (
-            Self::builder(env)
-                .on_finish(move |_| {
-                    let _ = tx.send(coil::Event::Dummy);
-                })
-                .num_threads(4)
-                .build(),
-            rx,
-        )
+    pub fn runner(env: Env) -> Self {
+        Self::builder(env).num_threads(4).build()
     }
 }
 
 impl<'a> TestGuard<'a, ()> {
-    pub fn dummy_runner() -> (Self, channel::Receiver<coil::Event>) {
-        let (tx, rx) = channel::unbounded();
-        (
-            Self::builder(())
-                .num_threads(4)
-                .on_finish(move |_| {
-                    let _ = tx.send(coil::Event::Dummy);
-                })
-                .build(),
-            rx,
-        )
+    pub fn dummy_runner() -> Self {
+        Self::builder(()).num_threads(4).build()
     }
 }
 
@@ -70,13 +51,6 @@ impl<Env> GuardBuilder<Env> {
 
     pub fn num_threads(mut self, threads: usize) -> Self {
         self.builder = self.builder.num_threads(threads);
-        self
-    }
-
-    /// Provide a hook that runs after a job has finished and all destructors have run
-    /// the `on_finish` closure accepts the job ID that finished as an argument
-    pub fn on_finish(mut self, on_finish: impl Fn(i64) + Send + Sync + 'static) -> Self {
-        self.builder = self.builder.on_finish(on_finish);
         self
     }
 

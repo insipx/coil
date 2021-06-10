@@ -25,7 +25,7 @@ use sqlx::Postgres;
 pub struct BackgroundJob {
     pub id: i64,
     pub job_type: String,
-    pub data: Vec<u8>,
+    pub data: serde_json::Value,
 }
 
 /// Run the migrations for the background tasks.
@@ -48,14 +48,13 @@ pub async fn migrate(pool: impl Acquire<'_, Database = Postgres>) -> Result<(), 
 }
 
 #[cfg(feature = "analyze")]
-pub async fn enqueue_job<T: Job>(
+pub async fn enqueue_job<T: Job + Send>(
     conn: impl Executor<'_, Database = Postgres>,
     job: T,
 ) -> Result<(), EnqueueError> {
-    let data = rmp_serde::encode::to_vec(&job)?;
     let res = sqlx::query_as::<_, (sqlx::types::Json<serde_json::Value>,)>("EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS) INSERT INTO _background_tasks (job_type, data) VALUES ($1, $2)")
         .bind(T::JOB_TYPE)
-        .bind(data)
+        .bind(sqlx::types::Json(job))
         .fetch_one(conn)
         .await?;
     log::debug!(
@@ -66,20 +65,19 @@ pub async fn enqueue_job<T: Job>(
 }
 
 #[cfg(not(feature = "analyze"))]
-pub async fn enqueue_job<T: Job>(
+pub async fn enqueue_job<T: Job + Send>(
     conn: impl Executor<'_, Database = Postgres>,
     job: T,
 ) -> Result<(), EnqueueError> {
-    let data = rmp_serde::encode::to_vec(&job)?;
     sqlx::query("INSERT INTO _background_tasks (job_type, data) VALUES ($1, $2)")
         .bind(T::JOB_TYPE)
-        .bind(data)
+        .bind(sqlx::types::Json(job))
         .execute(conn)
         .await?;
     Ok(())
 }
 
-pub async fn enqueue_jobs_batch<T: Job>(
+pub async fn enqueue_jobs_batch<T: Job + Send>(
     conn: &mut sqlx::PgConnection,
     jobs: Vec<T>,
 ) -> Result<(), EnqueueError> {
@@ -93,7 +91,6 @@ pub async fn enqueue_jobs_batch<T: Job>(
     );
 
     for job in jobs.into_iter() {
-        let data = rmp_serde::encode::to_vec(&job)?;
         batch.reserve(3)?;
         if batch.current_num_arguments() > 0 {
             batch.append(",");
@@ -101,7 +98,7 @@ pub async fn enqueue_jobs_batch<T: Job>(
         batch.append("(");
         batch.bind(T::JOB_TYPE)?;
         batch.append(",");
-        batch.bind(data)?;
+        batch.bind(sqlx::types::Json(job))?;
         batch.append(")");
     }
     batch.execute(conn).await?;
@@ -109,9 +106,6 @@ pub async fn enqueue_jobs_batch<T: Job>(
 }
 
 /// Get the next unlocked job.
-/// Optionally pass a boolean to specify whether to get the next unlocked synchronous or
-/// asynchronous job.
-/// Passing `None` gets the next unlocked job regardless of whether it is async or sync.
 pub async fn find_next_unlocked_job(
     conn: impl Executor<'_, Database = Postgres>,
 ) -> Result<Option<BackgroundJob>, sqlx::Error> {

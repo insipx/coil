@@ -50,7 +50,7 @@ fn resize_image_gen<E: Serialize + DeserializeOwned + Send + std::fmt::Display>(
 #[test]
 fn enqueue_8_jobs_limited_size() {
     initialize();
-    let (runner, rx) = TestGuard::runner((), 8);
+    let runner = TestGuard::runner(());
     log::info!("RUNNING `enqueue_8_jobs_limited_size`");
 
     let pool = runner.connection_pool();
@@ -88,19 +88,15 @@ fn enqueue_8_jobs_limited_size() {
 
     smol::block_on(async move {
         runner.run_pending_tasks().unwrap();
-        runner.check_for_failed_jobs(rx, 8).await.unwrap();
+        runner.check_for_failed_jobs().await.unwrap();
     });
 }
 
 #[test]
 fn generic_jobs_can_be_enqueued() {
     initialize();
-    let (tx, rx) = channel::bounded(5);
     let runner = TestGuard::builder(())
         .register_job::<resize_image_gen::Job<String>>()
-        .on_finish(move |_| {
-            tx.send(coil::Event::Dummy).unwrap();
-        })
         .build();
     log::info!("RUNNING `generic_jobs_can_be_enqueued`");
     let pool = runner.connection_pool();
@@ -127,6 +123,6 @@ fn generic_jobs_can_be_enqueued() {
             .await
             .unwrap();
         runner.run_pending_tasks().unwrap();
-        runner.check_for_failed_jobs(rx, 5).await.unwrap();
+        runner.check_for_failed_jobs().await.unwrap();
     });
 }
