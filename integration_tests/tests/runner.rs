@@ -13,7 +13,7 @@ use crate::test_guard::TestGuard;
 fn run_all_pending_jobs_returns_when_all_jobs_enqueued() -> Result<()> {
     crate::initialize();
     let barrier = Barrier::new(3);
-    let (runner, _wait_task) = TestGuard::runner(barrier.clone(), 2);
+    let runner = TestGuard::runner(barrier.clone());
     log::info!("RUNNING `run_all_pending_jobs_returns_when_all_jobs_enqueued`");
     let conn = runner.connection_pool();
 
@@ -47,7 +47,7 @@ fn run_all_pending_jobs_returns_when_all_jobs_enqueued() -> Result<()> {
 fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<()> {
     crate::initialize();
     let barrier = Barrier::new(3);
-    let (runner, task_wait) = TestGuard::runner(barrier.clone(), 2);
+    let runner = TestGuard::runner(barrier.clone());
     log::info!("RUNNING `check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished`");
     let conn = runner.connection_pool();
     smol::block_on(async {
@@ -76,7 +76,7 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
         assert!(rx.recv().is_ok(), "wait_for_jobs didn't return");
     });
 
-    let _ = smol::block_on(runner.check_for_failed_jobs(task_wait, 2));
+    let _ = smol::block_on(runner.check_for_failed_jobs());
     tx.send(())?;
     handle.join().unwrap();
     Ok(())
@@ -85,7 +85,7 @@ fn check_for_failed_jobs_blocks_until_all_queued_jobs_are_finished() -> Result<(
 #[test]
 fn check_for_failed_jobs_panics_if_jobs_failed() -> Result<()> {
     crate::initialize();
-    let (runner, rx) = TestGuard::dummy_runner();
+    let runner = TestGuard::dummy_runner();
     log::info!("RUNNING `check_for_failed_jobs_panics_if_jobs_failed`");
     let conn = runner.connection_pool();
     smol::block_on(async {
@@ -97,7 +97,7 @@ fn check_for_failed_jobs_panics_if_jobs_failed() -> Result<()> {
     runner.run_pending_tasks()?;
     assert_eq!(
         Err(coil::FailedJobsError::JobsFailed(3)),
-        smol::block_on(runner.check_for_failed_jobs(rx, 3))
+        smol::block_on(runner.check_for_failed_jobs())
     );
     Ok(())
 }
@@ -105,7 +105,7 @@ fn check_for_failed_jobs_panics_if_jobs_failed() -> Result<()> {
 #[test]
 fn panicking_jobs_are_caught_and_treated_as_failures() -> Result<()> {
     crate::initialize();
-    let (runner, rx) = TestGuard::dummy_runner();
+    let runner = TestGuard::dummy_runner();
     log::info!("RUNNING `panicking_jobs_are_caught_and_treated_as_failures`");
     let conn = runner.connection_pool();
     smol::block_on(async {
@@ -114,7 +114,7 @@ fn panicking_jobs_are_caught_and_treated_as_failures() -> Result<()> {
     })?;
 
     runner.run_pending_tasks()?;
-    let failed_jobs = smol::block_on(runner.check_for_failed_jobs(rx, 2));
+    let failed_jobs = smol::block_on(runner.check_for_failed_jobs());
     assert_eq!(Err(coil::FailedJobsError::JobsFailed(2)), failed_jobs);
     Ok(())
 }
@@ -123,14 +123,10 @@ fn panicking_jobs_are_caught_and_treated_as_failures() -> Result<()> {
 fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
     crate::initialize();
     let barrier = Barrier::new(2);
-    let (tx, rx) = channel::bounded(3);
     // A runner with 1 thread where all jobs will hang indefinitely.
     // The second job will never start.
     let runner = TestGuard::builder(barrier.clone())
         .num_threads(1)
-        .on_finish(move |_| {
-            let _ = tx.send(coil::Event::Dummy);
-        })
         .timeout(Duration::from_millis(50))
         .build();
     log::info!("RUNNING `run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout`");
@@ -146,7 +142,7 @@ fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
     // Make sure the jobs actually run so we don't panic on drop
     barrier.wait();
     barrier.wait();
-    smol::block_on(runner.check_for_failed_jobs(rx, 2)).unwrap();
+    smol::block_on(runner.check_for_failed_jobs()).unwrap();
     Ok(())
 }
 
@@ -156,14 +152,10 @@ fn run_all_pending_jobs_errs_if_jobs_dont_start_in_timeout() -> Result<()> {
 #[ignore]
 pub(crate) fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
     crate::initialize();
-    let (tx, rx) = channel::bounded(3);
 
     let runner = TestGuard::builder(())
         .num_threads(1)
         .timeout(std::time::Duration::from_secs(1))
-        .on_finish(move |_| {
-            let _ = tx.send(coil::Event::Dummy);
-        })
         .build();
     log::info!("RUNNING `jobs_failing_to_load_doesnt_panic_threads`");
     smol::block_on(async {
@@ -188,7 +180,7 @@ pub(crate) fn jobs_failing_to_load_doesnt_panic_threads() -> Result<()> {
 
     // this test is supposed to time out because the job is never actually 'run'
     // because we can't grab it due to read-only transaction
-    smol::block_on(runner.check_for_failed_jobs(rx, 1)).unwrap();
+    smol::block_on(runner.check_for_failed_jobs()).unwrap();
 
     Ok(())
 }

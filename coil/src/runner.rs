@@ -31,7 +31,6 @@ pub struct Builder<Env> {
     num_threads: Option<usize>,
     pg_pool: sqlx::PgPool,
     registry: Registry<Env>,
-    on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
     /// Amount of time to wait until job is deemed a failure
     timeout: Option<Duration>,
 }
@@ -44,7 +43,6 @@ impl<Env: 'static> Builder<Env> {
             pg_pool,
             num_threads: None,
             registry: Registry::load(),
-            on_finish: None,
             timeout: None,
         }
     }
@@ -80,13 +78,6 @@ impl<Env: 'static> Builder<Env> {
         self
     }
 
-    /// Provide a hook that runs after a job has finished and all destructors have run
-    /// the `on_finish` closure accepts the job ID that finished as an argument
-    pub fn on_finish(mut self, on_finish: impl Fn(i64) + Send + Sync + 'static) -> Self {
-        self.on_finish = Some(Arc::new(on_finish));
-        self
-    }
-
     /// Set a timeout in seconds.
     /// This timeout is the maximum amount of time coil will wait for a job to begin
     /// before returning an error.
@@ -111,7 +102,6 @@ impl<Env: 'static> Builder<Env> {
             pg_pool: self.pg_pool,
             environment: Arc::new(self.environment),
             registry: Arc::new(self.registry),
-            on_finish: self.on_finish,
             timeout,
         })
     }
@@ -124,7 +114,6 @@ pub struct Runner<Env> {
     pg_pool: PgPool,
     environment: Arc<Env>,
     registry: Arc<Registry<Env>>,
-    on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
     timeout: Duration,
 }
 
@@ -212,14 +201,12 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         F: FnOnce(db::BackgroundJob) -> Result<(), PerformError> + Send + UnwindSafe + 'static,
     {
         let pg_pool = self.pg_pool.clone();
-        let finish_hook = self.on_finish.clone();
         self.threadpool.execute(move || {
             let res = move || -> Result<(), PerformError> {
                 let (mut transaction, job) =
                     if let Some((t, j)) = block_on(Self::get_next_job(tx, &pg_pool)) {
                         (t, j)
                     } else {
-                        log::debug!("RETURNING");
                         return Ok(());
                     };
                 let job_id = job.id;
@@ -227,7 +214,6 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     .map_err(|e| try_to_extract_panic_info(&e))
                     .and_then(|r| r);
 
-                println!("Match result");
                 match result {
                     Ok(_) => block_on(db::delete_successful_job(&mut transaction, job_id))?,
                     Err(e) => {
@@ -236,9 +222,6 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     }
                 }
                 block_on(transaction.commit())?;
-                if let Some(f) = finish_hook {
-                    f(job_id)
-                }
                 Ok(())
             };
 
