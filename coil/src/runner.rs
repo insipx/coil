@@ -19,7 +19,6 @@ use crate::{db, error::*, registry::Registry};
 use channel::Sender;
 use futures::executor::block_on;
 use sqlx::PgPool;
-use sqlx::Postgres;
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe, PanicInfo, RefUnwindSafe, UnwindSafe};
 use std::sync::Arc;
@@ -129,7 +128,7 @@ pub struct Runner<Env> {
     timeout: Duration,
 }
 
-///
+#[derive(Debug)]
 pub enum Event {
     /// Queues are currently working
     Working,
@@ -137,10 +136,6 @@ pub enum Event {
     NoJobAvailable,
     /// An error occurred loading the job from the database
     ErrorLoadingJob(sqlx::Error),
-    /// Test for waiting on dummy tasks
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "test_components"))]
-    Dummy,
 }
 
 type TxJobPair = Option<(
@@ -195,7 +190,6 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 Ok(Event::ErrorLoadingJob(e)) => return Err(FetchError::FailedLoadingJob(e)),
                 Err(channel::RecvTimeoutError::Timeout) => return Err(FetchError::Timeout.into()),
                 Err(_) => return Err(FetchError::NoMessage.into()),
-                _ => return Ok(()),
             }
         }
     }
@@ -205,7 +199,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         let registry = Arc::clone(&self.registry);
         let pg_pool = AssertUnwindSafe(self.pg_pool.clone());
 
-        self.get_single_sync_job(tx, move |job| {
+        self.get_single_job(tx, move |job| {
             let perform_fn = registry
                 .get(&job.job_type)
                 .ok_or_else(|| PerformError::from(format!("Unknown job type {}", job.job_type)))?;
@@ -213,7 +207,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         });
     }
 
-    fn get_single_sync_job<F>(&self, tx: Sender<Event>, fun: F)
+    fn get_single_job<F>(&self, tx: Sender<Event>, fun: F)
     where
         F: FnOnce(db::BackgroundJob) -> Result<(), PerformError> + Send + UnwindSafe + 'static,
     {
@@ -221,17 +215,30 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         let finish_hook = self.on_finish.clone();
         self.threadpool.execute(move || {
             let res = move || -> Result<(), PerformError> {
-                let (transaction, job) =
+                let (mut transaction, job) =
                     if let Some((t, j)) = block_on(Self::get_next_job(tx, &pg_pool)) {
                         (t, j)
                     } else {
+                        log::debug!("RETURNING");
                         return Ok(());
                     };
                 let job_id = job.id;
                 let result = catch_unwind(|| fun(job))
                     .map_err(|e| try_to_extract_panic_info(&e))
                     .and_then(|r| r);
-                block_on(Self::finish_work(result, transaction, job_id, finish_hook));
+
+                println!("Match result");
+                match result {
+                    Ok(_) => block_on(db::delete_successful_job(&mut transaction, job_id))?,
+                    Err(e) => {
+                        eprintln!("Job {} failed to run: {}", job_id, e);
+                        block_on(db::update_failed_job(&mut transaction, job_id))?
+                    }
+                }
+                block_on(transaction.commit())?;
+                if let Some(f) = finish_hook {
+                    f(job_id)
+                }
                 Ok(())
             };
 
@@ -270,34 +277,6 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         };
         Some((transaction, job))
     }
-
-    async fn finish_work(
-        res: Result<(), PerformError>,
-        mut trx: sqlx::Transaction<'static, Postgres>,
-        job_id: i64,
-        on_finish: Option<Arc<dyn Fn(i64) + Send + Sync + 'static>>,
-    ) {
-        match res {
-            Ok(_) => {
-                db::delete_successful_job(&mut trx, job_id)
-                    .await
-                    .map_err(|e| panic!("Failed to delete job: {:?}", e))
-                    .expect("Panic is mapped");
-            }
-            Err(e) => {
-                // TODO: Fix killing the execution
-                eprintln!("Job {} failed to run: {}", job_id, e);
-                db::update_failed_job(&mut trx, job_id)
-                    .await
-                    .expect(&format!("failed to update failed job: {:?}", e));
-            }
-        }
-
-        trx.commit().await.expect("Failed to commit transaction");
-        if let Some(f) = on_finish {
-            f(job_id)
-        }
-    }
 }
 
 fn try_to_extract_panic_info(info: &(dyn Any + Send + 'static)) -> PerformError {
@@ -316,35 +295,19 @@ fn try_to_extract_panic_info(info: &(dyn Any + Send + 'static)) -> PerformError 
 impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     /// Wait for tasks to finish based on timeout
     /// this is mostly used for internal tests
-    async fn wait_for_all_tasks(&self, rx: channel::Receiver<Event>, pending: usize) {
-        use futures::{FutureExt, StreamExt};
-
-        let mut dummy_tasks = pending;
-        let mut rx = rx.into_stream();
-        while dummy_tasks > 0 {
-            let timeout = timer::Delay::new(self.timeout);
-            futures::select! {
-                msg = rx.next() => match msg {
-                    // Some(Event::Working) => continue,
-                    Some(Event::NoJobAvailable) => break,
-                    Some(Event::Dummy) => dummy_tasks -= 1,
-                    _ => (),
-                },
-                _ = timeout.fuse() => {
-                    log::warn!("TASK WAIT TIMED OUT");
-                    break
-                },
-            };
+    fn wait_for_all_tasks(&self) -> Result<(), String> {
+        self.threadpool.join();
+        let panic_count = self.threadpool.panic_count();
+        if panic_count == 0 {
+            Ok(())
+        } else {
+            Err(format!("{} threads panicked", panic_count).into())
         }
     }
 
     /// Check for any jobs that may have failed
-    pub async fn check_for_failed_jobs(
-        &self,
-        rx: channel::Receiver<Event>,
-        pending: usize,
-    ) -> Result<(), FailedJobsError> {
-        self.wait_for_all_tasks(rx, pending).await;
+    pub async fn check_for_failed_jobs(&self) -> Result<(), FailedJobsError> {
+        self.wait_for_all_tasks().unwrap();
         let num_failed = db::failed_job_count(&self.pg_pool).await.unwrap();
         if num_failed == 0 {
             Ok(())
@@ -393,7 +356,10 @@ mod tests {
     }
 
     fn create_dummy_job(runner: &Runner<()>) -> i64 {
-        let data = rmp_serde::to_vec(vec![0].as_slice()).unwrap();
+        let data = serde_json::json!({
+            "hello": "This a Job",
+            "data": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        });
         smol::block_on(async move {
             let mut conn = runner.connection().await.unwrap();
             let _rec = sqlx::query(
@@ -429,7 +395,7 @@ mod tests {
     fn sync_jobs_are_locked_when_fetched() {
         crate::initialize();
         let _guard = TestGuard::lock();
-        let mut runner = runner();
+        let runner = runner();
         let first_job_id = create_dummy_job(&runner);
         let second_job_id = create_dummy_job(&runner);
         let fetch_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
@@ -437,13 +403,9 @@ mod tests {
         let return_barrier = Arc::new(AssertUnwindSafe(Barrier::new(2)));
         let return_barrier2 = return_barrier.clone();
 
-        let (tx, rx) = channel::bounded(3);
-        let tx0 = tx.clone();
-        runner.on_finish = Some(Arc::new(move |_| {
-            tx0.send(Event::Dummy).unwrap();
-        }));
+        let (tx, _) = channel::bounded(3);
 
-        runner.get_single_sync_job(tx.clone(), move |job| {
+        runner.get_single_job(tx.clone(), move |job| {
             fetch_barrier.0.wait();
             assert_eq!(first_job_id, job.id);
             return_barrier.0.wait();
@@ -451,12 +413,12 @@ mod tests {
         });
 
         fetch_barrier2.0.wait();
-        runner.get_single_sync_job(tx.clone(), move |job| {
+        runner.get_single_job(tx.clone(), move |job| {
             assert_eq!(second_job_id, job.id);
             return_barrier2.0.wait();
             Ok(())
         });
-        smol::block_on(runner.wait_for_all_tasks(rx, 2));
+        runner.wait_for_all_tasks().unwrap();
     }
 
     #[test]
@@ -464,37 +426,30 @@ mod tests {
         crate::initialize();
         let _guard = TestGuard::lock();
 
-        let (tx, rx) = channel::bounded(1);
+        let (tx, _) = channel::bounded(1);
 
-        let mut runner = runner();
-        let tx0 = tx.clone();
-        runner.on_finish = Some(Arc::new(move |_| {
-            tx0.send(Event::Dummy).unwrap();
-        }));
+        let runner = runner();
         create_dummy_job(&runner);
-
-        smol::block_on(async move {
-            let mut conn = runner.connection().await.unwrap();
-            runner.get_single_sync_job(tx.clone(), move |_| Ok(()));
-            runner.wait_for_all_tasks(rx, 1).await;
-            let remaining_jobs = get_job_count(&mut conn).await;
-            assert_eq!(0, remaining_jobs);
-        });
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        let mut conn = block_on(runner.connection()).unwrap();
+        runner.get_single_job(tx.clone(), move |_| Ok(()));
+        runner.wait_for_all_tasks().unwrap();
+        let remaining_jobs = block_on(get_job_count(&mut conn));
+        assert_eq!(0, remaining_jobs);
     }
 
     #[test]
     fn panicking_in_sync_jobs_updates_retry_counter() {
         crate::initialize();
         let _guard = TestGuard::lock();
-        let mut runner = runner();
+        let runner = runner();
         let job_id = create_dummy_job(&runner);
-        let (tx, rx) = channel::bounded(3);
-        let tx0 = tx.clone();
-        runner.on_finish = Some(Arc::new(move |_| {
-            tx0.send(Event::Dummy).unwrap();
-        }));
-        runner.get_single_sync_job(tx.clone(), move |_| panic!());
-        smol::block_on(runner.wait_for_all_tasks(rx, 1));
+        let (tx, _) = channel::bounded(3);
+        runner.get_single_job(tx.clone(), move |_| {
+            println!("About to panic!");
+            panic!()
+        });
+        runner.wait_for_all_tasks().unwrap();
 
         let mut conn = smol::block_on(runner.connection()).unwrap();
         let tries = smol::block_on(

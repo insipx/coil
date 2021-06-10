@@ -81,7 +81,7 @@ macro_rules! register_job {
 pub struct JobVTable {
     env_type: TypeId,
     job_type: &'static str,
-    perform: fn(Vec<u8>, &dyn Any, &PgPool) -> Result<(), PerformError>,
+    perform: fn(serde_json::Value, &dyn Any, &PgPool) -> Result<(), PerformError>,
 }
 
 inventory::collect!(JobVTable);
@@ -97,7 +97,7 @@ impl JobVTable {
 }
 
 fn perform_sync_job<T: Job>(
-    data: Vec<u8>,
+    data: serde_json::Value,
     env: &dyn Any,
     conn: &PgPool,
 ) -> Result<(), PerformError> {
@@ -106,7 +106,7 @@ fn perform_sync_job<T: Job>(
          Please open an issue at https://github.com/paritytech/coil/issues/new"
             .into()
     })?;
-    let data = rmp_serde::from_read(data.as_slice())?;
+    let data = serde_json::from_value(data)?;
     T::perform(data, environment, conn)
 }
 
@@ -119,7 +119,7 @@ impl<Env: 'static + Send + Sync> PerformJob<Env> {
     /// Perform a job in a synchronous way.
     pub fn perform_sync(
         &self,
-        data: Vec<u8>,
+        data: serde_json::Value,
         env: &Env,
         conn: &PgPool,
     ) -> Result<(), PerformError> {
