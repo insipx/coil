@@ -124,6 +124,7 @@ pub async fn delete_successful_job(
     conn: impl Executor<'_, Database = Postgres>,
     id: i64,
 ) -> Result<(), sqlx::Error> {
+    puffin::profile_function!(); 
     sqlx::query("DELETE FROM _background_tasks WHERE id=$1")
         .bind(id)
         .execute(conn)
@@ -135,6 +136,7 @@ pub async fn update_failed_job(
     conn: impl Executor<'_, Database = Postgres>,
     id: i64,
 ) -> Result<(), PerformError> {
+    puffin::profile_function!(); 
     sqlx::query(
         "UPDATE _background_tasks SET retries = retries + 1, last_retry = NOW() WHERE id = $1",
     )

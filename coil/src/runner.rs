@@ -162,7 +162,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
 
         let mut pending_messages = 0;
         loop {
-            puffin::profile_scope!("Pending Task Loop"); 
+            puffin::profile_scope!("Runner"); 
             let available_threads = max_threads - self.threadpool.active_count();
 
             let jobs_to_queue = if pending_messages == 0 {
@@ -208,10 +208,11 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     where
         F: FnOnce(db::BackgroundJob) -> Result<(), PerformError> + Send + UnwindSafe + 'static,
     {
-        puffin::profile_function!(); 
+        
         let pg_pool = self.pg_pool.clone();
         self.threadpool.execute(move || {
             let res = move || -> Result<(), PerformError> {
+                puffin::profile_scope!("Job Transaction Execution");
                 let (mut transaction, job) =
                     if let Some((t, j)) = block_on(Self::get_next_job(tx, &pg_pool)) {
                         (t, j)
@@ -245,7 +246,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
 
     /// returns a transaction/job pair for the next Job
     async fn get_next_job(tx: Sender<Event>, pg_pool: &PgPool) -> TxJobPair {
-        puffin::profile_function!();
+        puffin::profile_function!(); 
         let now = std::time::Instant::now();
         let mut transaction = match pg_pool.begin().await {
             Ok(t) => t,
@@ -260,15 +261,15 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
 
         let job = match db::find_next_unlocked_job(&mut transaction).await {
             Ok(Some(j)) => {
-                tx.send(Event::Working).unwrap();
+                let _ = tx.send(Event::Working);
                 j
             }
             Ok(None) => {
-                tx.send(Event::NoJobAvailable).unwrap();
+                let _ = tx.send(Event::NoJobAvailable);
                 return None;
             }
             Err(e) => {
-                tx.send(Event::ErrorLoadingJob(e)).unwrap();
+                let _ = tx.send(Event::ErrorLoadingJob(e));
                 return None;
             }
         };
