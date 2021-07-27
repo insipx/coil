@@ -109,6 +109,7 @@ pub async fn enqueue_jobs_batch<T: Job + Send>(
 pub async fn find_next_unlocked_job(
     conn: impl Executor<'_, Database = Postgres>,
 ) -> Result<Option<BackgroundJob>, sqlx::Error> {
+    puffin::profile_function!(); 
     sqlx::query_as::<_, BackgroundJob>(
         "SELECT id, job_type, data
             FROM _background_tasks

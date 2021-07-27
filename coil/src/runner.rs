@@ -155,11 +155,14 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     /// Runs all the pending tasks in a loop
     /// Returns how many tasks are running as a result
     pub fn run_pending_tasks(&self) -> Result<(), FetchError> {
+        puffin::profile_function!(); 
         let max_threads = self.threadpool.max_count();
         let (tx, rx) = channel::bounded(max_threads);
+        log::trace!("Max Threads: {}", max_threads);
 
         let mut pending_messages = 0;
         loop {
+            puffin::profile_scope!("Pending Task Loop"); 
             let available_threads = max_threads - self.threadpool.active_count();
 
             let jobs_to_queue = if pending_messages == 0 {
@@ -178,12 +181,17 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 Ok(Event::NoJobAvailable) => return Ok(()),
                 Ok(Event::ErrorLoadingJob(e)) => return Err(FetchError::FailedLoadingJob(e)),
                 Err(channel::RecvTimeoutError::Timeout) => return Err(FetchError::Timeout.into()),
-                Err(_) => return Err(FetchError::NoMessage.into()),
+                Err(channel::RecvTimeoutError::Disconnected) => {
+                    log::warn!("Job sender disconnected!");
+                    return Err(FetchError::Timeout.into());
+                }
             }
+            puffin::GlobalProfiler::lock().new_frame();
         }
     }
-
+    
     fn run_single_sync_job(&self, tx: Sender<Event>) {
+        puffin::profile_function!();
         let env = Arc::clone(&self.environment);
         let registry = Arc::clone(&self.registry);
         let pg_pool = AssertUnwindSafe(self.pg_pool.clone());
@@ -195,11 +203,12 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
             perform_fn.perform_sync(job.data, &env, &pg_pool)
         });
     }
-
+    
     fn get_single_job<F>(&self, tx: Sender<Event>, fun: F)
     where
         F: FnOnce(db::BackgroundJob) -> Result<(), PerformError> + Send + UnwindSafe + 'static,
     {
+        puffin::profile_function!(); 
         let pg_pool = self.pg_pool.clone();
         self.threadpool.execute(move || {
             let res = move || -> Result<(), PerformError> {
@@ -236,6 +245,8 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
 
     /// returns a transaction/job pair for the next Job
     async fn get_next_job(tx: Sender<Event>, pg_pool: &PgPool) -> TxJobPair {
+        puffin::profile_function!();
+        let now = std::time::Instant::now();
         let mut transaction = match pg_pool.begin().await {
             Ok(t) => t,
             Err(e) => {
@@ -243,21 +254,30 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                 return None;
             }
         };
+        if now.elapsed() > Duration::from_secs(1) {
+            log::warn!("Took {:?} to start a transaction!!!", now.elapsed());
+        }
 
         let job = match db::find_next_unlocked_job(&mut transaction).await {
             Ok(Some(j)) => {
-                let _ = tx.send(Event::Working);
+                tx.send(Event::Working).unwrap();
                 j
             }
             Ok(None) => {
-                let _ = tx.send(Event::NoJobAvailable);
+                tx.send(Event::NoJobAvailable).unwrap();
                 return None;
             }
             Err(e) => {
-                let _ = tx.send(Event::ErrorLoadingJob(e));
+                tx.send(Event::ErrorLoadingJob(e)).unwrap();
                 return None;
             }
         };
+        if now.elapsed() > Duration::from_secs(1) {
+            log::warn!(
+                "Took {:?} to start a transaction and find a job",
+                now.elapsed()
+            );
+        }
         Some((transaction, job))
     }
 }
