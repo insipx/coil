@@ -33,6 +33,7 @@ pub struct Registry<Env> {
 
 impl<Env: 'static> Registry<Env> {
     pub fn register_job<T: Job + 'static + Send>(&mut self) {
+        puffin::profile_function!(); 
         if TypeId::of::<T::Environment>() == TypeId::of::<Env>() {
             self.jobs.insert(T::JOB_TYPE, JobVTable::from_job::<T>());
         } else {
@@ -101,6 +102,7 @@ fn perform_sync_job<T: Job>(
     env: &dyn Any,
     conn: &PgPool,
 ) -> Result<(), PerformError> {
+    puffin::profile_function!(); 
     let environment = env.downcast_ref().ok_or_else::<PerformError, _>(|| {
         "Incorrect environment type. This should never happen. \
          Please open an issue at https://github.com/paritytech/coil/issues/new"
@@ -123,6 +125,7 @@ impl<Env: 'static + Send + Sync> PerformJob<Env> {
         env: &Env,
         conn: &PgPool,
     ) -> Result<(), PerformError> {
+        puffin::profile_function!(); 
         (self.vtable.perform)(data, env, conn)
     }
 }
