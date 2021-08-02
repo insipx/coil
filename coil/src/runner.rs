@@ -220,10 +220,11 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                         return Ok(());
                     };
                 let job_id = job.id;
+                puffin::profile_scope!("Perform the job");
                 let result = catch_unwind(|| fun(job))
                     .map_err(|e| try_to_extract_panic_info(&e))
                     .and_then(|r| r);
-
+                puffin::profile_scope!("Delete the Job");
                 match result {
                     Ok(_) => block_on(db::delete_successful_job(&mut transaction, job_id))?,
                     Err(e) => {
@@ -231,6 +232,7 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                         block_on(db::update_failed_job(&mut transaction, job_id))?
                     }
                 }
+                puffin::profile_scope!("Commit the job");
                 block_on(transaction.commit())?;
                 Ok(())
             };
