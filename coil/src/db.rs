@@ -21,7 +21,7 @@ use crate::job::Job;
 use sqlx::prelude::*;
 use sqlx::Postgres;
 
-#[derive(FromRow)]
+#[derive(FromRow, Debug)]
 pub struct BackgroundJob {
     pub id: i64,
     pub job_type: String,
@@ -109,11 +109,24 @@ pub async fn enqueue_jobs_batch<T: Job + Send>(
 pub async fn find_next_unlocked_job(
     conn: impl Executor<'_, Database = Postgres>,
 ) -> Result<Option<BackgroundJob>, sqlx::Error> {
-    puffin::profile_function!(); 
     sqlx::query_as::<_, BackgroundJob>(
-        "SELECT id, job_type, data
-            FROM _background_tasks
-            ORDER BY id FOR UPDATE SKIP LOCKED",
+        "
+            WITH selected_job AS (
+                SELECT id, job_type, data
+                    FROM _background_tasks
+                    WHERE locked_at IS NULL
+                    ORDER BY id
+                    LIMIT 1
+                    FOR NO KEY UPDATE SKIP LOCKED
+            ) 
+            UPDATE _background_tasks
+            SET
+                locked_at = now(),
+                locked_by = pg_backend_pid()
+            FROM selected_job
+            WHERE _background_tasks.id = selected_job.id
+            RETURNING *
+        "
     )
     .fetch_optional(conn)
     .await
@@ -124,7 +137,6 @@ pub async fn delete_successful_job(
     conn: impl Executor<'_, Database = Postgres>,
     id: i64,
 ) -> Result<(), sqlx::Error> {
-    puffin::profile_function!(); 
     sqlx::query("DELETE FROM _background_tasks WHERE id=$1")
         .bind(id)
         .execute(conn)
@@ -136,7 +148,6 @@ pub async fn update_failed_job(
     conn: impl Executor<'_, Database = Postgres>,
     id: i64,
 ) -> Result<(), PerformError> {
-    puffin::profile_function!(); 
     sqlx::query(
         "UPDATE _background_tasks SET retries = retries + 1, last_retry = NOW() WHERE id = $1",
     )

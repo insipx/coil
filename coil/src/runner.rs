@@ -127,11 +127,6 @@ pub enum Event {
     ErrorLoadingJob(sqlx::Error),
 }
 
-type TxJobPair = Option<(
-    sqlx::Transaction<'static, sqlx::Postgres>,
-    db::BackgroundJob,
-)>;
-
 // Methods which don't require `RefUnwindSafe`
 impl<Env: 'static> Runner<Env> {
     /// Build the builder for `Runner`
@@ -155,14 +150,12 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     /// Runs all the pending tasks in a loop
     /// Returns how many tasks are running as a result
     pub fn run_pending_tasks(&self) -> Result<(), FetchError> {
-        puffin::profile_function!(); 
         let max_threads = self.threadpool.max_count();
         let (tx, rx) = channel::bounded(max_threads);
         log::trace!("Max Threads: {}", max_threads);
 
         let mut pending_messages = 0;
         loop {
-            puffin::profile_scope!("Runner"); 
             let available_threads = max_threads - self.threadpool.active_count();
 
             let jobs_to_queue = if pending_messages == 0 {
@@ -186,12 +179,10 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                     return Err(FetchError::Timeout.into());
                 }
             }
-            puffin::GlobalProfiler::lock().new_frame();
         }
     }
     
     fn run_single_sync_job(&self, tx: Sender<Event>) {
-        puffin::profile_function!();
         let env = Arc::clone(&self.environment);
         let registry = Arc::clone(&self.registry);
         let pg_pool = AssertUnwindSafe(self.pg_pool.clone());
@@ -212,19 +203,16 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
         let pg_pool = self.pg_pool.clone();
         self.threadpool.execute(move || {
             let res = move || -> Result<(), PerformError> {
-                puffin::profile_scope!("Job Transaction Execution");
-                let (mut transaction, job) =
-                    if let Some((t, j)) = block_on(Self::get_next_job(tx, &pg_pool)) {
-                        (t, j)
-                    } else {
-                        return Ok(());
-                    };
+                let job = if let Some(j) = block_on(Self::get_next_job(tx, &pg_pool))? {
+                    j 
+                } else { 
+                    return Ok(());
+                };
                 let job_id = job.id;
-                puffin::profile_scope!("Perform the job");
                 let result = catch_unwind(|| fun(job))
                     .map_err(|e| try_to_extract_panic_info(&e))
                     .and_then(|r| r);
-                puffin::profile_scope!("Delete the Job");
+                let mut transaction = block_on(pg_pool.begin())?;
                 match result {
                     Ok(_) => block_on(db::delete_successful_job(&mut transaction, job_id))?,
                     Err(e) => {
@@ -232,7 +220,6 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
                         block_on(db::update_failed_job(&mut transaction, job_id))?
                     }
                 }
-                puffin::profile_scope!("Commit the job");
                 block_on(transaction.commit())?;
                 Ok(())
             };
@@ -247,20 +234,15 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
     }
 
     /// returns a transaction/job pair for the next Job
-    async fn get_next_job(tx: Sender<Event>, pg_pool: &PgPool) -> TxJobPair {
-        puffin::profile_function!(); 
-        let now = std::time::Instant::now();
+    async fn get_next_job(tx: Sender<Event>, pg_pool: &PgPool) -> Result<Option<db::BackgroundJob>, PerformError> {
         let mut transaction = match pg_pool.begin().await {
             Ok(t) => t,
             Err(e) => {
                 let _ = tx.send(Event::ErrorLoadingJob(e));
-                return None;
+                return Ok(None);
             }
         };
-        if now.elapsed() > Duration::from_secs(1) {
-            log::warn!("Took {:?} to start a transaction!!!", now.elapsed());
-        }
-
+        
         let job = match db::find_next_unlocked_job(&mut transaction).await {
             Ok(Some(j)) => {
                 let _ = tx.send(Event::Working);
@@ -268,20 +250,15 @@ impl<Env: Send + Sync + RefUnwindSafe + 'static> Runner<Env> {
             }
             Ok(None) => {
                 let _ = tx.send(Event::NoJobAvailable);
-                return None;
+                return Ok(None);
             }
             Err(e) => {
                 let _ = tx.send(Event::ErrorLoadingJob(e));
-                return None;
+                return Ok(None);
             }
         };
-        if now.elapsed() > Duration::from_secs(1) {
-            log::warn!(
-                "Took {:?} to start a transaction and find a job",
-                now.elapsed()
-            );
-        }
-        Some((transaction, job))
+        transaction.commit().await?;
+        Ok(Some(job))
     }
 }
 
@@ -436,7 +413,6 @@ mod tests {
 
         let runner = runner();
         create_dummy_job(&runner);
-        std::thread::sleep(std::time::Duration::from_secs(5));
         let mut conn = block_on(runner.connection()).unwrap();
         runner.get_single_job(tx.clone(), move |_| Ok(()));
         runner.wait_for_all_tasks().unwrap();
